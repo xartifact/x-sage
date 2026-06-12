@@ -1,0 +1,23 @@
+{
+  "name": "@x-concepts/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "x-concepts": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "manifest": "bun run src/index.ts manifest",
+    "activate": "bun run src/index.ts activate",
+    "frontier": "bun run src/index.ts frontier",
+    "validate": "bun run src/index.ts validate",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@x-concepts/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
