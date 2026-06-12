@@ -1,0 +1,24 @@
+{
+  "name": "@x-concepts/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types/index.ts",
+    "./graph": "./src/graph/index.ts",
+    "./manifest": "./src/manifest/index.ts",
+    "./checkpoint": "./src/checkpoint/index.ts",
+    "./frontier": "./src/frontier/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "echo 'core is TypeScript source, no build needed'"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "zod": "^3.23.8"
+  }
+}
