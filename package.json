@@ -1,0 +1,22 @@
+{
+  "name": "x-concepts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LLM-native concept knowledge graph",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "bun run --filter='@x-concepts/*' build",
+    "cli": "bun run --filter @x-concepts/cli dev",
+    "viz": "bun run --filter @x-concepts/viz dev",
+    "typecheck": "bun run --filter='@x-concepts/*' typecheck",
+    "validate": "bun run --filter @x-concepts/cli validate"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.4.5"
+  }
+}

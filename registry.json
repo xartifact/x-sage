@@ -1,0 +1,13 @@
+{
+  "version": "1",
+  "knowledgeBases": [
+    {
+      "id": "default",
+      "name": "Default",
+      "description": "",
+      "path": "kb/default",
+      "domains": [],
+      "created": "2026-06-05"
+    }
+  ]
+}
