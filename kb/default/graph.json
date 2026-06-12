@@ -1,0 +1,637 @@
+{
+  "nodes": [
+    {
+      "id": "agent",
+      "atom": "能行动、有意图的实体，是所有行为、目标、价值判断的不可还原的载体。",
+      "layer": 0,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L0-axioms/agent.md"
+    },
+    {
+      "id": "context",
+      "atom": "决定概念如何具体生效的环境条件，使抽象概念获得具体意义的前提本身。",
+      "layer": 0,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L0-axioms/context.md"
+    },
+    {
+      "id": "tension",
+      "atom": "两个价值或目标在同一语境下无法同时被满足的状态，是推理和决策存在的根本原因。",
+      "layer": 0,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L0-axioms/tension.md"
+    },
+    {
+      "id": "value",
+      "atom": "对主体重要的事物，是所有目标选择和价值判断的终极依据，无法再分解为更基础的概念。",
+      "layer": 0,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L0-axioms/value.md"
+    },
+    {
+      "id": "risk",
+      "atom": "在特定语境下，目标实现可能被破坏的不确定张力，是未来的潜在损失。",
+      "layer": 1,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L1-core/risk.md"
+    },
+    {
+      "id": "need",
+      "atom": "主体在特定语境下，因价值缺口导致的必须被满足的状态，是行动的底线驱动。",
+      "layer": 1,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L1-core/need.md"
+    },
+    {
+      "id": "goal",
+      "atom": "主体在特定语境下基于价值想要达到的状态，是行动的方向性锚点。",
+      "layer": 1,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L1-core/goal.md"
+    },
+    {
+      "id": "constraint",
+      "atom": "在特定语境下限制主体可能行动空间的条件，是可能性的边界而非障碍。",
+      "layer": 1,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L1-core/constraint.md"
+    },
+    {
+      "id": "decision",
+      "atom": "主体在张力中，于约束条件下做出的不可逆选择，是行动的起点而非推理的终点。",
+      "layer": 1,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L1-core/decision.md"
+    },
+    {
+      "id": "latent-need",
+      "atom": "主体未意识到但行为中反复显现的需求，在需求缺口未满足时以症状形式表达。",
+      "layer": 2,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L2-support/latent-need.md"
+    },
+    {
+      "id": "hard-soft-constraint",
+      "atom": "硬约束不可通过行动改变，软约束可在资源投入后调整——区分二者是决策的前提。",
+      "layer": 2,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L2-support/hard-soft-constraint.md"
+    },
+    {
+      "id": "pseudo-need",
+      "atom": "用户表达的解决方案而非真实需求，将'如何做'误认为'要什么'的常见谬误。",
+      "layer": 2,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L2-support/pseudo-need.md"
+    },
+    {
+      "id": "latent-goal",
+      "atom": "未被显式表述但实际驱动主体行为的目标，比声明的目标更能预测行动。",
+      "layer": 2,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L2-support/latent-goal.md"
+    },
+    {
+      "id": "decision-traceability",
+      "atom": "保留决策的推理结构以供回溯学习，使决策可解释而非只看结果好坏。",
+      "layer": 2,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L2-support/decision-traceability.md"
+    },
+    {
+      "id": "risk-asymmetry",
+      "atom": "下行损失远大于上行收益的风险结构，使'避免灾难'比'追求最优'更理性。",
+      "layer": 2,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L2-support/risk-asymmetry.md"
+    },
+    {
+      "id": "goal-drift",
+      "atom": "手段逐渐变成目的本身的过程，原始目标被遗忘或替代而主体未察觉。",
+      "layer": 2,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L2-support/goal-drift.md"
+    },
+    {
+      "id": "constraint-cascade",
+      "atom": "一个层面的约束沿依赖链传导到下游，使低层约束比表面看到的更严苛。",
+      "layer": 2,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L2-support/constraint-cascade.md"
+    }
+  ],
+  "edges": [
+    {
+      "from": "agent",
+      "type": "enables",
+      "target": "value",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "agent",
+      "type": "enables",
+      "target": "tension",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "context",
+      "type": "enables",
+      "target": "tension",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "context",
+      "type": "enables",
+      "target": "constraint",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "tension",
+      "type": "enables",
+      "target": "decision",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "tension",
+      "type": "enables",
+      "target": "risk",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "value",
+      "type": "enables",
+      "target": "tension",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "value",
+      "type": "enables",
+      "target": "goal",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "value",
+      "type": "enables",
+      "target": "need",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "risk",
+      "type": "depends-on",
+      "target": "tension",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "risk",
+      "type": "depends-on",
+      "target": "context",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "risk",
+      "type": "depends-on",
+      "target": "goal",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "risk",
+      "type": "depends-on",
+      "target": "constraint",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "risk",
+      "type": "enables",
+      "target": "decision",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "need",
+      "type": "depends-on",
+      "target": "agent",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "need",
+      "type": "depends-on",
+      "target": "value",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "need",
+      "type": "depends-on",
+      "target": "context",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "need",
+      "type": "enables",
+      "target": "decision",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "need",
+      "type": "contradicts",
+      "target": "goal",
+      "confidence": "hypothetical"
+    },
+    {
+      "from": "goal",
+      "type": "depends-on",
+      "target": "agent",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "goal",
+      "type": "depends-on",
+      "target": "value",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "goal",
+      "type": "depends-on",
+      "target": "context",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "goal",
+      "type": "enables",
+      "target": "decision",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "goal",
+      "type": "enables",
+      "target": "risk",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "goal",
+      "type": "part-of",
+      "target": "tension",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "constraint",
+      "type": "depends-on",
+      "target": "agent",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "constraint",
+      "type": "depends-on",
+      "target": "context",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "constraint",
+      "type": "enables",
+      "target": "decision",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "constraint",
+      "type": "enables",
+      "target": "risk",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "constraint",
+      "type": "contradicts",
+      "target": "goal",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "decision",
+      "type": "depends-on",
+      "target": "agent",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "decision",
+      "type": "depends-on",
+      "target": "tension",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "decision",
+      "type": "depends-on",
+      "target": "constraint",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "decision",
+      "type": "depends-on",
+      "target": "goal",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "decision",
+      "type": "depends-on",
+      "target": "need",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "decision",
+      "type": "enables",
+      "target": "risk",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "latent-need",
+      "type": "part-of",
+      "target": "need",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "latent-need",
+      "type": "depends-on",
+      "target": "need",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "latent-need",
+      "type": "depends-on",
+      "target": "agent",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "latent-need",
+      "type": "depends-on",
+      "target": "value",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "latent-need",
+      "type": "contradicts",
+      "target": "pseudo-need",
+      "confidence": "hypothetical"
+    },
+    {
+      "from": "hard-soft-constraint",
+      "type": "part-of",
+      "target": "constraint",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "hard-soft-constraint",
+      "type": "depends-on",
+      "target": "constraint",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "hard-soft-constraint",
+      "type": "depends-on",
+      "target": "agent",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "hard-soft-constraint",
+      "type": "depends-on",
+      "target": "context",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "hard-soft-constraint",
+      "type": "enables",
+      "target": "decision",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "pseudo-need",
+      "type": "part-of",
+      "target": "need",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "pseudo-need",
+      "type": "depends-on",
+      "target": "need",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "pseudo-need",
+      "type": "depends-on",
+      "target": "agent",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "pseudo-need",
+      "type": "depends-on",
+      "target": "context",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "pseudo-need",
+      "type": "contradicts",
+      "target": "need",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "latent-goal",
+      "type": "part-of",
+      "target": "goal",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "latent-goal",
+      "type": "depends-on",
+      "target": "agent",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "latent-goal",
+      "type": "depends-on",
+      "target": "context",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "latent-goal",
+      "type": "contradicts",
+      "target": "goal",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "decision-traceability",
+      "type": "part-of",
+      "target": "decision",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "decision-traceability",
+      "type": "depends-on",
+      "target": "decision",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "decision-traceability",
+      "type": "depends-on",
+      "target": "agent",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "decision-traceability",
+      "type": "depends-on",
+      "target": "context",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "risk-asymmetry",
+      "type": "part-of",
+      "target": "risk",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "risk-asymmetry",
+      "type": "depends-on",
+      "target": "risk",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "risk-asymmetry",
+      "type": "depends-on",
+      "target": "value",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "risk-asymmetry",
+      "type": "depends-on",
+      "target": "tension",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "risk-asymmetry",
+      "type": "contradicts",
+      "target": "goal",
+      "confidence": "hypothetical"
+    },
+    {
+      "from": "goal-drift",
+      "type": "part-of",
+      "target": "goal",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "goal-drift",
+      "type": "depends-on",
+      "target": "goal",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "goal-drift",
+      "type": "depends-on",
+      "target": "context",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "goal-drift",
+      "type": "depends-on",
+      "target": "tension",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "goal-drift",
+      "type": "contradicts",
+      "target": "goal",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "constraint-cascade",
+      "type": "part-of",
+      "target": "constraint",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "constraint-cascade",
+      "type": "depends-on",
+      "target": "constraint",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "constraint-cascade",
+      "type": "depends-on",
+      "target": "context",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "constraint-cascade",
+      "type": "depends-on",
+      "target": "tension",
+      "confidence": "confirmed"
+    },
+    {
+      "from": "constraint-cascade",
+      "type": "enables",
+      "target": "risk",
+      "confidence": "confirmed"
+    }
+  ]
+}
