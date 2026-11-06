@@ -82,21 +82,18 @@ ENV NODE_ENV=production
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=prod-deps /app/apps/server/node_modules ./apps/server/node_modules
-COPY --from=prod-deps /app/apps/cli/node_modules ./apps/cli/node_modules
 COPY --from=prod-deps /app/packages/core/node_modules ./packages/core/node_modules
 COPY --from=prod-deps /app/packages/service/node_modules ./packages/service/node_modules
 
-# 运行期需要 core / service / server 的源码，外加 cli：它不是给最终用户装的，
-# 而是让运维能在容器内对同一个 KB 执行 `bun apps/cli/src/index.ts --kb /app/kb/default ...`
-# （写入提案、重建 graph.json）。最终用户装的是编译好的单一客户端，不含 KB。
+# 运行期只需要 core / service / server 的源码。
+# CLI 不进来：它是纯 REST 客户端，容器里跑它等于让服务端连自己；
+# 运维在宿主机用同一版客户端连 `http(s)://<host>:3001` 即可。
 COPY --from=builder /app/packages/core/package.json ./packages/core/
 COPY --from=builder /app/packages/core/src ./packages/core/src
 COPY --from=builder /app/packages/service/package.json ./packages/service/
 COPY --from=builder /app/packages/service/src ./packages/service/src
 COPY --from=builder /app/apps/server/package.json ./apps/server/
 COPY --from=builder /app/apps/server/src ./apps/server/src
-COPY --from=builder /app/apps/cli/package.json ./apps/cli/
-COPY --from=builder /app/apps/cli/src ./apps/cli/src
 COPY --from=builder /app/apps/viz/dist ./apps/viz/dist
 
 # KB 数据打进镜像。若希望部署后仍能改概念文件，把它挂成 volume 覆盖此路径。
@@ -105,8 +102,6 @@ COPY --from=builder /app/kb ./kb
 ENV PORT=3000
 ENV HOST=0.0.0.0
 ENV X_SAGE_KB=/app/kb/default
-# 不设 X_SAGE_SERVER：容器内 CLI 默认直接读本地 KB，避免绕一圈连自己。
-ENV PATH="/app/node_modules/.bin:${PATH}"
 
 EXPOSE 3000
 
