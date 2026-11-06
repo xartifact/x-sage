@@ -186,452 +186,627 @@
       ],
       "confidence": "confirmed",
       "filePath": "concepts/L2-support/constraint-cascade.md"
+    },
+    {
+      "id": "org-goal-drift-detection",
+      "atom": "组织层面的目标漂移检测机制：季度起源检查仪式，配合5项漂移信号清单和3种干预模式。",
+      "layer": 3,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L3-instances/org-goal-drift-detection.md"
+    },
+    {
+      "id": "constraint-cascade-map",
+      "atom": "从下游症状向上游根源追溯约束传导链的映射技术，包含逐层回溯法和完整的传导链案例。",
+      "layer": 3,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L3-instances/constraint-cascade-map.md"
+    },
+    {
+      "id": "need-interview-five-whys",
+      "atom": "用户说'我需要X'时连续追问五次为什么，从解决方案层逐层下探到真实需求的访谈技术。",
+      "layer": 3,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L3-instances/need-interview-five-whys.md"
+    },
+    {
+      "id": "tech-debt-asymmetry",
+      "atom": "技术债务创造不对称风险：短期收益线性增长，但迁移成本随时间呈指数增长。",
+      "layer": 3,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L3-instances/tech-debt-asymmetry.md"
+    },
+    {
+      "id": "adr-template",
+      "atom": "架构决策记录（ADR）模板及完整示例，将决策可追溯性具象化为可执行的文档实践。",
+      "layer": 3,
+      "domain": [
+        "product",
+        "philosophy"
+      ],
+      "confidence": "confirmed",
+      "filePath": "concepts/L3-instances/adr-template.md"
     }
   ],
   "edges": [
     {
-      "from": "agent",
       "type": "enables",
       "target": "value",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "agent"
     },
     {
-      "from": "agent",
       "type": "enables",
       "target": "tension",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "agent"
     },
     {
-      "from": "context",
       "type": "enables",
       "target": "tension",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "context"
     },
     {
-      "from": "context",
       "type": "enables",
       "target": "constraint",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "context"
     },
     {
-      "from": "tension",
       "type": "enables",
       "target": "decision",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "tension"
     },
     {
-      "from": "tension",
       "type": "enables",
       "target": "risk",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "tension"
     },
     {
-      "from": "value",
       "type": "enables",
       "target": "tension",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "value"
     },
     {
-      "from": "value",
       "type": "enables",
       "target": "goal",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "value"
     },
     {
-      "from": "value",
       "type": "enables",
       "target": "need",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "value"
     },
     {
-      "from": "risk",
       "type": "depends-on",
       "target": "tension",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "risk"
     },
     {
-      "from": "risk",
       "type": "depends-on",
       "target": "context",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "risk"
     },
     {
-      "from": "risk",
       "type": "depends-on",
       "target": "goal",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "risk"
     },
     {
-      "from": "risk",
       "type": "depends-on",
       "target": "constraint",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "risk"
     },
     {
-      "from": "risk",
       "type": "enables",
       "target": "decision",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "risk"
     },
     {
-      "from": "need",
       "type": "depends-on",
       "target": "agent",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "need"
     },
     {
-      "from": "need",
       "type": "depends-on",
       "target": "value",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "need"
     },
     {
-      "from": "need",
       "type": "depends-on",
       "target": "context",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "need"
     },
     {
-      "from": "need",
       "type": "enables",
       "target": "decision",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "need"
     },
     {
-      "from": "need",
       "type": "contradicts",
       "target": "goal",
-      "confidence": "hypothetical"
+      "confidence": "hypothetical",
+      "from": "need"
     },
     {
-      "from": "goal",
       "type": "depends-on",
       "target": "agent",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "goal"
     },
     {
-      "from": "goal",
       "type": "depends-on",
       "target": "value",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "goal"
     },
     {
-      "from": "goal",
       "type": "depends-on",
       "target": "context",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "goal"
     },
     {
-      "from": "goal",
       "type": "enables",
       "target": "decision",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "goal"
     },
     {
-      "from": "goal",
       "type": "enables",
       "target": "risk",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "goal"
     },
     {
-      "from": "goal",
       "type": "part-of",
       "target": "tension",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "goal"
     },
     {
-      "from": "constraint",
       "type": "depends-on",
       "target": "agent",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "constraint"
     },
     {
-      "from": "constraint",
       "type": "depends-on",
       "target": "context",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "constraint"
     },
     {
-      "from": "constraint",
       "type": "enables",
       "target": "decision",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "constraint"
     },
     {
-      "from": "constraint",
       "type": "enables",
       "target": "risk",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "constraint"
     },
     {
-      "from": "constraint",
       "type": "contradicts",
       "target": "goal",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "constraint"
     },
     {
-      "from": "decision",
       "type": "depends-on",
       "target": "agent",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "decision"
     },
     {
-      "from": "decision",
       "type": "depends-on",
       "target": "tension",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "decision"
     },
     {
-      "from": "decision",
       "type": "depends-on",
       "target": "constraint",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "decision"
     },
     {
-      "from": "decision",
       "type": "depends-on",
       "target": "goal",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "decision"
     },
     {
-      "from": "decision",
       "type": "depends-on",
       "target": "need",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "decision"
     },
     {
-      "from": "decision",
       "type": "enables",
       "target": "risk",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "decision"
     },
     {
-      "from": "latent-need",
-      "type": "part-of",
+      "type": "is-a",
       "target": "need",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "latent-need"
     },
     {
-      "from": "latent-need",
       "type": "depends-on",
       "target": "need",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "latent-need"
     },
     {
-      "from": "latent-need",
       "type": "depends-on",
       "target": "agent",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "latent-need"
     },
     {
-      "from": "latent-need",
       "type": "depends-on",
       "target": "value",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "latent-need"
     },
     {
-      "from": "latent-need",
       "type": "contradicts",
       "target": "pseudo-need",
-      "confidence": "hypothetical"
+      "confidence": "hypothetical",
+      "from": "latent-need"
     },
     {
-      "from": "hard-soft-constraint",
       "type": "part-of",
       "target": "constraint",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "hard-soft-constraint"
     },
     {
-      "from": "hard-soft-constraint",
       "type": "depends-on",
       "target": "constraint",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "hard-soft-constraint"
     },
     {
-      "from": "hard-soft-constraint",
       "type": "depends-on",
       "target": "agent",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "hard-soft-constraint"
     },
     {
-      "from": "hard-soft-constraint",
       "type": "depends-on",
       "target": "context",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "hard-soft-constraint"
     },
     {
-      "from": "hard-soft-constraint",
       "type": "enables",
       "target": "decision",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "hard-soft-constraint"
     },
     {
-      "from": "pseudo-need",
-      "type": "part-of",
+      "type": "is-a",
       "target": "need",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "pseudo-need"
     },
     {
-      "from": "pseudo-need",
       "type": "depends-on",
       "target": "need",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "pseudo-need"
     },
     {
-      "from": "pseudo-need",
       "type": "depends-on",
       "target": "agent",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "pseudo-need"
     },
     {
-      "from": "pseudo-need",
       "type": "depends-on",
       "target": "context",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "pseudo-need"
     },
     {
-      "from": "pseudo-need",
       "type": "contradicts",
       "target": "need",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "pseudo-need"
     },
     {
-      "from": "latent-goal",
-      "type": "part-of",
+      "type": "is-a",
       "target": "goal",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "latent-goal"
     },
     {
-      "from": "latent-goal",
       "type": "depends-on",
       "target": "agent",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "latent-goal"
     },
     {
-      "from": "latent-goal",
       "type": "depends-on",
       "target": "context",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "latent-goal"
     },
     {
-      "from": "latent-goal",
       "type": "contradicts",
       "target": "goal",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "latent-goal"
     },
     {
-      "from": "decision-traceability",
       "type": "part-of",
       "target": "decision",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "decision-traceability"
     },
     {
-      "from": "decision-traceability",
       "type": "depends-on",
       "target": "decision",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "decision-traceability"
     },
     {
-      "from": "decision-traceability",
       "type": "depends-on",
       "target": "agent",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "decision-traceability"
     },
     {
-      "from": "decision-traceability",
       "type": "depends-on",
       "target": "context",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "decision-traceability"
     },
     {
-      "from": "risk-asymmetry",
       "type": "part-of",
       "target": "risk",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "risk-asymmetry"
     },
     {
-      "from": "risk-asymmetry",
       "type": "depends-on",
       "target": "risk",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "risk-asymmetry"
     },
     {
-      "from": "risk-asymmetry",
       "type": "depends-on",
       "target": "value",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "risk-asymmetry"
     },
     {
-      "from": "risk-asymmetry",
       "type": "depends-on",
       "target": "tension",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "risk-asymmetry"
     },
     {
-      "from": "risk-asymmetry",
       "type": "contradicts",
       "target": "goal",
-      "confidence": "hypothetical"
+      "confidence": "hypothetical",
+      "from": "risk-asymmetry"
     },
     {
-      "from": "goal-drift",
-      "type": "part-of",
+      "type": "is-a",
       "target": "goal",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "goal-drift"
     },
     {
-      "from": "goal-drift",
       "type": "depends-on",
       "target": "goal",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "goal-drift"
     },
     {
-      "from": "goal-drift",
       "type": "depends-on",
       "target": "context",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "goal-drift"
     },
     {
-      "from": "goal-drift",
       "type": "depends-on",
       "target": "tension",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "goal-drift"
     },
     {
-      "from": "goal-drift",
       "type": "contradicts",
       "target": "goal",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "goal-drift"
     },
     {
-      "from": "constraint-cascade",
       "type": "part-of",
       "target": "constraint",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "constraint-cascade"
     },
     {
-      "from": "constraint-cascade",
       "type": "depends-on",
       "target": "constraint",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "constraint-cascade"
     },
     {
-      "from": "constraint-cascade",
       "type": "depends-on",
       "target": "context",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "constraint-cascade"
     },
     {
-      "from": "constraint-cascade",
       "type": "depends-on",
       "target": "tension",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "constraint-cascade"
     },
     {
-      "from": "constraint-cascade",
       "type": "enables",
       "target": "risk",
-      "confidence": "confirmed"
+      "confidence": "confirmed",
+      "from": "constraint-cascade"
+    },
+    {
+      "type": "instantiates",
+      "target": "goal-drift",
+      "confidence": "confirmed",
+      "from": "org-goal-drift-detection"
+    },
+    {
+      "type": "depends-on",
+      "target": "goal-drift",
+      "confidence": "confirmed",
+      "from": "org-goal-drift-detection"
+    },
+    {
+      "type": "depends-on",
+      "target": "goal",
+      "confidence": "confirmed",
+      "from": "org-goal-drift-detection"
+    },
+    {
+      "type": "depends-on",
+      "target": "agent",
+      "confidence": "confirmed",
+      "from": "org-goal-drift-detection"
+    },
+    {
+      "type": "instantiates",
+      "target": "constraint-cascade",
+      "confidence": "confirmed",
+      "from": "constraint-cascade-map"
+    },
+    {
+      "type": "depends-on",
+      "target": "constraint-cascade",
+      "confidence": "confirmed",
+      "from": "constraint-cascade-map"
+    },
+    {
+      "type": "depends-on",
+      "target": "constraint",
+      "confidence": "confirmed",
+      "from": "constraint-cascade-map"
+    },
+    {
+      "type": "depends-on",
+      "target": "context",
+      "confidence": "confirmed",
+      "from": "constraint-cascade-map"
+    },
+    {
+      "type": "instantiates",
+      "target": "pseudo-need",
+      "confidence": "confirmed",
+      "from": "need-interview-five-whys"
+    },
+    {
+      "type": "depends-on",
+      "target": "pseudo-need",
+      "confidence": "confirmed",
+      "from": "need-interview-five-whys"
+    },
+    {
+      "type": "depends-on",
+      "target": "need",
+      "confidence": "confirmed",
+      "from": "need-interview-five-whys"
+    },
+    {
+      "type": "depends-on",
+      "target": "agent",
+      "confidence": "confirmed",
+      "from": "need-interview-five-whys"
+    },
+    {
+      "type": "instantiates",
+      "target": "risk-asymmetry",
+      "confidence": "confirmed",
+      "from": "tech-debt-asymmetry"
+    },
+    {
+      "type": "depends-on",
+      "target": "risk-asymmetry",
+      "confidence": "confirmed",
+      "from": "tech-debt-asymmetry"
+    },
+    {
+      "type": "depends-on",
+      "target": "risk",
+      "confidence": "confirmed",
+      "from": "tech-debt-asymmetry"
+    },
+    {
+      "type": "depends-on",
+      "target": "value",
+      "confidence": "confirmed",
+      "from": "tech-debt-asymmetry"
+    },
+    {
+      "type": "instantiates",
+      "target": "decision-traceability",
+      "confidence": "confirmed",
+      "from": "adr-template"
+    },
+    {
+      "type": "depends-on",
+      "target": "decision-traceability",
+      "confidence": "confirmed",
+      "from": "adr-template"
+    },
+    {
+      "type": "depends-on",
+      "target": "decision",
+      "confidence": "confirmed",
+      "from": "adr-template"
+    },
+    {
+      "type": "depends-on",
+      "target": "context",
+      "confidence": "confirmed",
+      "from": "adr-template"
     }
   ]
 }

@@ -6,10 +6,8 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [伪需求, 表面需求, 虚假需求, 解决方案伪装, 伪诉求, pseudo need, false requirement]
-requires: [need, agent, context]
-enables: []
 edges:
-  - type: part-of
+  - type: is-a
     target: need
     confidence: confirmed
   - type: depends-on

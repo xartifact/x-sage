@@ -6,10 +6,8 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [隐性需求, 潜在需求, 未意识需求, 隐藏需求, 深层需求, latent need, unspoken need]
-requires: [need, agent, value]
-enables: []
 edges:
-  - type: part-of
+  - type: is-a
     target: need
     confidence: confirmed
   - type: depends-on

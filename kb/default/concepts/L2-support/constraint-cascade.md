@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [约束传导, 约束链, 约束传播, 级联约束, 依赖链约束, constraint cascade, constraint propagation]
-requires: [constraint, context, tension]
-enables: []
 edges:
   - type: part-of
     target: constraint

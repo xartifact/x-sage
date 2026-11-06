@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [生成, 推演, 创造, 构想, 设计, 假设, generation, synthesize]
-requires: [agent, value, context]
-enables: []
 edges:
   - type: instantiates
     target: agent

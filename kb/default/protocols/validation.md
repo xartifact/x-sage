@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [验证, 检验, 质疑, 反驳, 一致性, 辩证, 审查, validation, verify]
-requires: [tension, context]
-enables: []
 edges:
   - type: instantiates
     target: tension

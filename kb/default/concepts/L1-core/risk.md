@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [风险, 不确定性, 威胁, 失败, 损失, 隐患, 脆弱, 危机, risk, uncertainty]
-requires: [tension, context, goal]
-enables: [decision]
 edges:
   - type: depends-on
     target: tension

@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [硬约束, 软约束, 不可变约束, 可变约束, 物理约束, 协商约束, hard constraint, soft constraint]
-requires: [constraint, agent, context]
-enables: []
 edges:
   - type: part-of
     target: constraint

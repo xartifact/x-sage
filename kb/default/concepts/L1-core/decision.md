@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [决策, 选择, 取舍, 判断, 定夺, 方向, 决定, 抉择, decision, choice]
-requires: [agent, tension, constraint]
-enables: [risk]
 edges:
   - type: depends-on
     target: agent
@@ -58,7 +56,7 @@ edges:
 
 ### 决策的三种模式
 
-根据 AGENTS.md 中的对话协议，决策对应三种激活策略：
+根据 `protocols/` 中的对话协议，决策对应三种激活策略：
 - **探索模式**：沿 `enables` 边展开决策的可能后果
 - **验证模式**：沿 `contradicts` 边检查决策的盲点
 - **生成模式**：从公理出发推演决策的深层合理性

@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [张力, 冲突, 矛盾, 两难, 权衡, 取舍, 博弈, 对立, 悖论, tradeoff]
-requires: []
-enables: [decision, risk]
 edges:
   - type: enables
     target: decision

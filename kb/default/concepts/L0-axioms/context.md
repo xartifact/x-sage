@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [语境, 场景, 环境, 条件, 背景, 情境, 阶段, 前提, 上下文, context]
-requires: []
-enables: [constraint, goal, need, risk]
 edges:
   - type: enables
     target: tension

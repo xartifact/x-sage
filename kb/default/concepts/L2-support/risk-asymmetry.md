@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [风险不对称, 不对称风险, 下行风险, 毁灭性风险, 尾部风险, 凸性风险, risk asymmetry, tail risk]
-requires: [risk, value, tension]
-enables: []
 edges:
   - type: part-of
     target: risk

@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [探索, 发现, 展开, 理解, 关联, exploration, discover]
-requires: [context, agent]
-enables: []
 edges:
   - type: instantiates
     target: context

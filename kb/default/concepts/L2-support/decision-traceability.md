@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [决策追溯, 决策记录, ADR, 决策可解释, 决策日志, 回溯, decision traceability, ADR]
-requires: [decision, agent, context]
-enables: []
 edges:
   - type: part-of
     target: decision

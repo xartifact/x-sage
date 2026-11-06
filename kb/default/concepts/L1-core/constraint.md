@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [约束, 限制, 边界, 条件, 制约, 预算, 截止, 依赖, constraint, limitation, boundary]
-requires: [agent, context]
-enables: [decision, risk]
 edges:
   - type: depends-on
     target: agent

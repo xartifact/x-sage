@@ -6,10 +6,8 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [目标漂移, 手段目的倒置, 目标替代, 目标遗忘, 过程异化, goal drift, goal displacement]
-requires: [goal, context, tension]
-enables: []
 edges:
-  - type: part-of
+  - type: is-a
     target: goal
     confidence: confirmed
   - type: depends-on

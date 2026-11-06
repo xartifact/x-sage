@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [价值, 价值观, 重要, 优先, 好坏, 判断标准, 追求, 信仰, 取舍依据]
-requires: []
-enables: [goal, need, tension]
 edges:
   - type: enables
     target: tension

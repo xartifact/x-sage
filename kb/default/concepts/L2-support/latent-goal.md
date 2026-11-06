@@ -6,10 +6,8 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [隐含目标, 潜在目标, 真实目的, 真实意图, 私下目标, 隐性目的, latent goal, hidden agenda]
-requires: [goal, agent, context]
-enables: []
 edges:
-  - type: part-of
+  - type: is-a
     target: goal
     confidence: confirmed
   - type: depends-on

@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [主体, 用户, 自我, 他人, 行动者, 组织, 团队, 利益相关者, agent, actor]
-requires: []
-enables: [value, goal, decision, need]
 edges:
   - type: enables
     target: value

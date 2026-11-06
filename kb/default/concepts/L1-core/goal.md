@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [目标, 里程碑, 成功标准, 交付物, 方向, 追求, 目的, 靶点, goal, objective]
-requires: [agent, value, context]
-enables: [decision, risk, constraint]
 edges:
   - type: depends-on
     target: agent

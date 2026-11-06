@@ -6,8 +6,6 @@ domain: [product, philosophy]
 confidence: confirmed
 source: synthesis
 triggers: [需求, 必须, 缺口, 痛点, 底线, 缺乏, 诉求, 需要, necessity, need, requirement]
-requires: [agent, value, context]
-enables: [decision, constraint]
 edges:
   - type: depends-on
     target: agent
