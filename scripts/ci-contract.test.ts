@@ -86,6 +86,16 @@ describe("Dockerfile", () => {
     expect(dockerfile).toContain("ENV X_SAGE_KB=/app/kb/default");
   });
 
+  test("does not copy a node_modules the CLI never gets", async () => {
+    // The CLI declares no dependencies, so bun creates no apps/cli/node_modules
+    // in a clean checkout. Copying it worked only where a stale directory from
+    // before that change still existed, and broke the first CI build.
+    const dockerfile = await read("Dockerfile");
+    const runnerStage = dockerfile.slice(dockerfile.indexOf("FROM base AS runner"));
+    expect(runnerStage).not.toContain("apps/cli/node_modules");
+    expect(runnerStage).not.toContain("COPY --from=builder /app/apps/cli/src");
+  });
+
   test("does not ship devDependencies in the runtime stage", async () => {
     // typescript alone is 23 MB and is never loaded at runtime.
     const dockerfile = await read("Dockerfile");
