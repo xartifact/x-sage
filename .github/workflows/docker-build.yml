@@ -50,7 +50,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: viz-dist
-          path: viz-dist/
+          # The build writes to apps/viz/dist; the artifact renames it to
+          # viz-dist/ so the Docker build context never picks up a stale
+          # working-tree copy (.dockerignore excludes apps/viz/dist).
+          path: apps/viz/dist/
+          # Fail loudly instead of uploading nothing: the previous `warn`
+          # default let a path typo reach the build job as "artifact not found".
+          if-no-files-found: error
           retention-days: 1
 
   build:

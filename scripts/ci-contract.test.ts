@@ -191,6 +191,25 @@ describe("multi-arch build safety", () => {
     expect(dockerfile).toContain("PREBUILT_VIZ=true but viz-dist/index.html is missing");
   });
 
+  test("upload path matches the build output, and missing files fail", async () => {
+    // Both halves of the handoff must agree: `vite build` writes apps/viz/dist,
+    // and a wrong upload path with the default `warn` silently produces no
+    // artifact — the build job then fails with a confusing "not found".
+    const workflow = await read(".github/workflows/docker-build.yml");
+    const uploadStep = workflow.slice(
+      workflow.indexOf("name: Upload SPA bundle"),
+      workflow.indexOf("  build:"),
+    );
+    expect(uploadStep).toContain("path: apps/viz/dist/");
+    expect(uploadStep).toContain("if-no-files-found: error");
+
+    const downloadStep = workflow.slice(
+      workflow.indexOf("name: Download SPA bundle"),
+      workflow.indexOf("setup-qemu-action"),
+    );
+    expect(downloadStep).toContain("name: viz-dist");
+  });
+
   test("prebuilt SPA travels in its own directory, outside .dockerignore", async () => {
     // `apps/viz/dist` is gitignored and dockerignored: the working-tree copy may
     // be stale, so it must never silently become the shipped bundle.
