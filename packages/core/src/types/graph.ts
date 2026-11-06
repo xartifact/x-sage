@@ -12,6 +12,9 @@ export const GraphNodeSchema = z.object({
 
 export const GraphEdgeSchema = EdgeSchema.extend({
   from: z.string().min(1),
+  // Present only on edges inferred by transitive closure. Holds the first
+  // intermediate node ids of one witness path, so a derived edge is explainable.
+  derived: z.array(z.string()).optional(),
 });
 
 export const GraphSchema = z.object({

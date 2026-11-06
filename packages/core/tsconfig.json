@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "paths": {
-      "@x-concepts/core": ["./src/index.ts"]
+      "@x-sage/core": ["./src/index.ts"]
     }
   },
   "include": ["src/**/*"]

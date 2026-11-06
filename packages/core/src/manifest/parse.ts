@@ -26,8 +26,6 @@ export function formatConceptFile(concept: ConceptFile): string {
     source: frontmatter.source,
     triggers: frontmatter.triggers,
   };
-  if (frontmatter.requires.length > 0) fm.requires = frontmatter.requires;
-  if (frontmatter.enables.length > 0) fm.enables = frontmatter.enables;
   if (frontmatter.edges.length > 0) fm.edges = frontmatter.edges;
 
   // YAML frontmatter stringification

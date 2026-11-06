@@ -12,3 +12,5 @@ export type { ManifestRow } from "./manifest.ts";
 
 export { CheckpointSchema } from "./checkpoint.ts";
 export type { Checkpoint } from "./checkpoint.ts";
+
+export { formatZodError } from "./zod-error.ts";

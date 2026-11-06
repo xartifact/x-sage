@@ -1,5 +1,5 @@
 {
-  "name": "@x-concepts/core",
+  "name": "@x-sage/core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,11 +11,13 @@
     "./graph": "./src/graph/index.ts",
     "./manifest": "./src/manifest/index.ts",
     "./checkpoint": "./src/checkpoint/index.ts",
-    "./frontier": "./src/frontier/index.ts"
+    "./frontier": "./src/frontier/index.ts",
+    "./proposals": "./src/proposals/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "echo 'core is TypeScript source, no build needed'"
+    "build": "echo 'core is TypeScript source, no build needed'",
+    "test": "bun test"
   },
   "dependencies": {
     "gray-matter": "^4.0.3",

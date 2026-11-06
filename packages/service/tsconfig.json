@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@x-sage/core": ["../core/src/index.ts"],
+      "@x-sage/core/*": ["../core/src/*"]
+    }
+  },
+  "include": ["src/**/*"]
+}

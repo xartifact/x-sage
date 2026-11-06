@@ -14,6 +14,7 @@ export {
   ManifestRowSchema,
   CheckpointSchema,
 } from "./types/index.ts";
+export { formatZodError } from "./types/index.ts";
 
 // Manifest module
 export { parseConceptFile, formatConceptFile } from "./manifest/index.ts";
@@ -22,6 +23,23 @@ export { generateManifest, formatManifest } from "./manifest/index.ts";
 // Graph module
 export { extractSubgraph, hopSubgraph } from "./graph/index.ts";
 export { traverse, shortestPath } from "./graph/index.ts";
+export { generateGraph, formatGraph } from "./graph/index.ts";
+export { validateGraph } from "./graph/index.ts";
+export type { GraphValidationIssue, GraphValidationResult } from "./graph/index.ts";
+export { RELATION_SPECS, EDGE_TYPES, completeSymmetricEdges, edgeKey, layerViolation } from "./graph/index.ts";
+export type { RelationSpec } from "./graph/index.ts";
+export { transitiveClosure, findEdgeCycles } from "./graph/index.ts";
+export type { EdgeCycle } from "./graph/index.ts";
+export { targetsOf, sourcesOf, incidentEdges } from "./graph/index.ts";
+
+// Manifest module (search)
+export { searchManifest } from "./manifest/index.ts";
+
+// Proposals module
+export { proposeEdge, refineAtom } from "./proposals/index.ts";
+export { listEdgeProposals, listAtomProposals } from "./proposals/index.ts";
+export type { EdgeProposal, AtomProposal } from "./proposals/index.ts";
+export { mergeEdgeProposal, mergeAtomProposal } from "./proposals/index.ts";
 
 // Checkpoint module
 export { readCheckpoint, writeCheckpoint } from "./checkpoint/index.ts";

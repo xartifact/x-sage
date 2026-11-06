@@ -47,8 +47,9 @@ export const ConceptFrontmatterSchema = z.object({
   confidence: ConfidenceSchema,
   source: SourceSchema,
   triggers: z.array(z.string()).min(1),
-  requires: z.array(z.string()).default([]),
-  enables: z.array(z.string()).default([]),
+  // `requires` and `enables` are derived from `edges` (depends-on / enables).
+  // They used to be hand-maintained duplicates; 8 of 18 enables entries had
+  // already drifted from the edge list, so the edges are now the only source.
   edges: z.array(EdgeSchema).default([]),
 });
 
