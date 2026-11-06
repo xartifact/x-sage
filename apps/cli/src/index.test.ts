@@ -1,0 +1,258 @@
+import { describe, expect, test } from "bun:test";
+import { resolve, join } from "node:path";
+import { mkdtemp, cp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { createApp } from "../../server/src/app.ts";
+
+/**
+ * CLI tests.
+ *
+ * The CLI is a REST client, so the contract it publishes is exactly three
+ * things: exit code, stdout bytes, and stderr text. Each case spawns the real
+ * binary because `main()` runs on import.
+ *
+ * Every case goes through a real HTTP server: the CLI has no local mode, and
+ * the point of these tests is that a client with no filesystem access still
+ * gets fully rendered output.
+ */
+
+const CLI = resolve(import.meta.dir, "index.ts");
+const REAL_KB = resolve(import.meta.dir, "../../../kb/default");
+
+interface Run {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+async function run(args: string[]): Promise<Run> {
+  const proc = Bun.spawn(["bun", CLI, ...args], {
+    cwd: process.cwd(),
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, X_SAGE_SERVER: "", X_SAGE_KB: "", X_SAGE_TOKEN: "" },
+  });
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  return { stdout, stderr, exitCode: await proc.exited };
+}
+
+/**
+ * A real HTTP server on an ephemeral port.
+ *
+ * Remote-mode assertions must go over the wire: the point is that no kb data
+ * reaches the client.
+ */
+function serve(writeToken?: string) {
+  const app = createApp({ kbRoot: REAL_KB, ...(writeToken === undefined ? {} : { writeToken }) });
+  const server = Bun.serve({ port: 0, fetch: (request) => app.fetch(request) });
+  return {
+    url: `http://127.0.0.1:${server.port}`,
+    stop: () => server.stop(true),
+  };
+}
+
+/**
+ * Run one command against a live server.
+ *
+ * The CLI has no local mode, so every assertion needs a server; starting one
+ * per case keeps the suite parallel-safe and proves the client never touches
+ * the filesystem.
+ */
+async function againstServer(
+  args: string[],
+  options: { writeToken?: string } = {},
+): Promise<Run> {
+  const server = serve(options.writeToken);
+  try {
+    const tokenArgs = options.writeToken === undefined ? [] : ["--token", options.writeToken];
+    return await run(["--server", server.url, ...tokenArgs, ...args]);
+  } finally {
+    server.stop();
+  }
+}
+
+describe("read commands", () => {
+  test("activate prints the AI transcript with derived REQUIRES", async () => {
+    const { stdout, exitCode } = await againstServer(["activate", "decision"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("[CONCEPT: decision]");
+    // context and value are only reachable transitively.
+    expect(stdout).toMatch(/REQUIRES: \[.*context.*value.*\]/);
+  });
+
+  test("edges --dir in surfaces inbound relations", async () => {
+    const { stdout, exitCode } = await againstServer(["edges", "goal", "--type", "contradicts", "--dir", "in"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("↔ contradicts (5)");
+    expect(stdout).toContain("latent-goal");
+  });
+
+  test("edges --derived adds closure edges that the default view omits", async () => {
+    // decision asserts 5 prerequisites; `value` is only reachable transitively.
+    const withoutDerived = await againstServer(["edges", "decision", "--type", "depends-on", "--dir", "out"]);
+    const withDerived = await againstServer(["edges", "decision", "--type", "depends-on", "--dir", "out", "--derived"]);
+
+    expect(withoutDerived.exitCode).toBe(0);
+    expect(withDerived.exitCode).toBe(0);
+    expect(withoutDerived.stdout).not.toContain("value");
+    expect(withDerived.stdout).toContain("value");
+    expect(withDerived.stdout).toContain("(derived)");
+  });
+
+  test("search finds concepts by trigger keyword", async () => {
+    const { stdout, exitCode } = await againstServer(["search", "决策"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("decision");
+  });
+
+  test("validate --graph exits 0 for a clean KB", async () => {
+    const { stdout, exitCode } = await againstServer(["validate", "--graph"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Graph integrity: no issues found");
+  });
+});
+
+describe("error handling", () => {
+  test("an unknown concept exits 1 with a message on stderr", async () => {
+    const { stderr, exitCode } = await againstServer(["activate", "nope"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("Concept not found: nope");
+  });
+
+  test("an invalid edge type lists the valid values", async () => {
+    const { stderr, exitCode } = await againstServer(["edges", "goal", "--type", "bogus"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("Must be one of:");
+  });
+
+  test("frontier add is refused because it would delete prose sections", async () => {
+    const { stderr, exitCode } = await againstServer(["frontier", "add", "x", "y", "z"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("disabled");
+  });
+
+  test("viz export requires an explicit path", async () => {
+    const { stderr, exitCode } = await againstServer(["viz", "export"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("Usage:");
+  });
+
+  test("no server configured is an error, not a silent bundled-KB fallback", async () => {
+    // There is no local mode: without a target the client must not guess.
+    const { stderr, exitCode } = await run(["activate", "decision"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("No server configured");
+  });
+});
+
+describe("validate against a broken KB", () => {
+  test("reports every file and exits 1 without dumping a ZodError", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "x-sage-cli-"));
+    try {
+      await cp(REAL_KB, dir, { recursive: true });
+      await writeFile(
+        join(dir, "concepts", "L1-core", "broken.md"),
+        "---\nid: broken\natom: x\nlayer: 9\n---\nbody\n",
+      );
+
+      const brokenServer = Bun.serve({ port: 0, fetch: (r) => createApp({ kbRoot: dir }).fetch(r) });
+      try {
+        const { stdout, exitCode } = await run([
+          "--server", `http://127.0.0.1:${brokenServer.port}`, "validate", "--graph",
+        ]);
+        expect(exitCode).toBe(1);
+        expect(stdout).toContain("✗ concepts/L1-core/broken.md");
+        expect(stdout).toContain("22/23 concepts valid");
+        // The unbuildable graph must be one line, not a serialized error object.
+        expect(stdout).toContain("[unbuildable]");
+        expect(stdout).not.toContain("unionErrors");
+      } finally {
+        brokenServer.stop(true);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * The client speaks only HTTP: no local mode remains, so these cases start a
+ * real server and assert the wire contract end to end.
+ */
+describe("wire contract", () => {
+  const cases = [
+    ["activate", "decision"],
+    ["activate", "decision", "--strategy", "validation", "--depth", "1"],
+    ["activate", "goal", "--format", "human"],
+    ["edges", "goal", "--type", "contradicts", "--dir", "in"],
+    ["edges", "decision", "--type", "depends-on", "--dir", "out"],
+    ["edges", "decision", "--type", "depends-on", "--dir", "out", "--derived"],
+    ["search", "决策"],
+    ["search", "risk", "--format", "manifest"],
+    ["path", "risk", "value"],
+    ["validate"],
+    ["validate", "--graph"],
+    ["manifest"],
+    ["proposals", "list"],
+    ["frontier", "list"],
+    ["graph", "validate"],
+  ] as const;
+
+  for (const args of cases) {
+    test(`"${args.join(" ")}" succeeds against the server`, async () => {
+      const result = await againstServer([...args]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.length).toBeGreaterThan(0);
+    });
+  }
+
+  test("errors arrive as text, not as a JSON object on stderr", async () => {
+    const server = serve();
+    try {
+      const { stderr, exitCode } = await run(["--server", server.url, "activate", "nope"]);
+      expect(exitCode).toBe(1);
+      expect(stderr).toBe("Concept not found: nope\n");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("an unreachable server fails with a readable message", async () => {
+    const { stderr, exitCode } = await run(["--server", "http://127.0.0.1:1", "activate", "decision"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("cannot reach");
+  });
+
+  test("writes require the token when the server is configured with one", async () => {
+    const server = serve("s3cret");
+    try {
+      const denied = await run(["--server", server.url, "proposals", "merge", "nope.md"]);
+      expect(denied.exitCode).toBe(1);
+      expect(denied.stderr).toContain("Unauthorized");
+
+      const allowed = await run([
+        "--server", server.url,
+        "--token", "s3cret",
+        "proposals", "merge", "nope.md",
+      ]);
+      expect(allowed.exitCode).toBe(0);
+      expect(allowed.stdout).toContain("No pending proposals to merge");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("reads still work without a token when writes are protected", async () => {
+    const server = serve("s3cret");
+    try {
+      const { stdout, exitCode } = await run(["--server", server.url, "edges", "goal", "--dir", "in"]);
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("contradicts");
+    } finally {
+      server.stop();
+    }
+  });
+});

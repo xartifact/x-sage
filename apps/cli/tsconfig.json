@@ -3,7 +3,9 @@
   "compilerOptions": {
     "types": ["bun"],
     "paths": {
-      "@x-concepts/core": ["../core/src/index.ts"]
+      "@x-sage/core": ["../../packages/core/src/index.ts"],
+      "@x-sage/core/*": ["../../packages/core/src/*"],
+      "@x-sage/service": ["../../packages/service/src/index.ts"]
     }
   },
   "include": ["src/**/*"]
