@@ -4,8 +4,8 @@
     "jsx": "react-jsx",
     "lib": ["ESNext", "DOM"],
     "paths": {
-      "@x-concepts/core": ["../core/src/index.ts"]
+      "@x-sage/core": ["../../packages/core/src/index.ts"]
     }
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "src/vite-env.d.ts"]
 }

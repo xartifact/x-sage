@@ -7,11 +7,11 @@ import type { GraphNode, Layer, EdgeType } from "./types";
 import "./styles.css";
 
 export default function App() {
-  const { data, loading, error } = useGraphData();
+  const { data, loading, error, reload } = useGraphData();
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [visibleLayers, setVisibleLayers] = useState<Set<Layer>>(new Set([0, 1]));
   const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<Set<EdgeType>>(
-    new Set(["enables", "depends-on", "contradicts", "part-of"])
+    new Set(["is-a", "part-of", "depends-on", "enables", "instantiates", "contradicts", "analogous-to"])
   );
 
   const handleToggleLayer = useCallback((layer: Layer) => {
@@ -64,6 +64,12 @@ export default function App() {
           <div className="error-icon">⚠️</div>
           <div className="error-text">加载数据失败</div>
           <div className="error-detail">{error || "数据不可用"}</div>
+          <p className="error-hint">
+            数据由 API 提供。请确认后端已启动：<code>bun run server</code>
+          </p>
+          <button className="error-retry" onClick={reload}>
+            重试
+          </button>
         </div>
       </div>
     );
@@ -71,7 +77,7 @@ export default function App() {
 
   return (
     <div className="app-container">
-      <div className="app-title">x-concepts 知识图谱</div>
+      <div className="app-title">x-sage 知识图谱</div>
 
       <FilterControls
         visibleLayers={visibleLayers}

@@ -234,7 +234,9 @@ export default function ConceptGraph({
               viewBox="0 -5 10 10"
               refX={type === "contradicts" ? 28 : 22}
               refY={0}
-              markerWidth={6}
+              /* Symmetric relations render undirected; an arrowhead would imply
+                 a direction the relation does not have. */
+              markerWidth={type === "contradicts" || type === "analogous-to" ? 0 : 6}
               markerHeight={6}
               orient="auto"
             >
@@ -265,7 +267,13 @@ export default function ConceptGraph({
                 stroke={EDGE_COLORS[edge.type]}
                 strokeWidth={strokeWidth}
                 strokeOpacity={opacity}
-                strokeDasharray={edge.type === "contradicts" ? "6,4" : undefined}
+                strokeDasharray={
+                  edge.type === "contradicts"
+                    ? "6,4"
+                    : edge.type === "analogous-to"
+                      ? "2,4"
+                      : undefined
+                }
                 markerEnd={`url(#arrow-${edge.type})`}
               />
             );

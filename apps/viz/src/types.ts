@@ -1,5 +1,12 @@
 export type Layer = 0 | 1 | 2 | 3;
-export type EdgeType = "enables" | "depends-on" | "contradicts" | "part-of";
+export type EdgeType =
+  | "is-a"
+  | "part-of"
+  | "depends-on"
+  | "enables"
+  | "instantiates"
+  | "contradicts"
+  | "analogous-to";
 export type Confidence = "confirmed" | "hypothetical" | "contested";
 export type Source = "personal" | "domain" | "synthesis";
 export type Domain = "product" | "philosophy" | "personal-thought" | string;
@@ -12,8 +19,6 @@ export interface GraphNode {
   confidence: Confidence;
   source: Source;
   triggers: string[];
-  requires: string[];
-  enables: string[];
   filePath: string;
   molecule: string;
 }
@@ -25,9 +30,24 @@ export interface GraphEdge {
   confidence: Confidence;
 }
 
+export interface GraphEdgeInfo {
+  /** True for the mirrored half of a symmetric relation (not author-written). */
+  mirrored?: boolean;
+}
+
+export interface VizMeta {
+  conceptCount: number;
+  assertedEdgeCount: number;
+  edgeTypes: EdgeType[];
+  generatedAt: string;
+  confidenceCounts: Record<Confidence, number>;
+  layerCounts: Record<string, number>;
+}
+
 export interface GraphData {
   nodes: GraphNode[];
-  edges: GraphEdge[];
+  edges: Array<GraphEdge & GraphEdgeInfo>;
+  meta?: VizMeta;
 }
 
 export const LAYER_COLORS: Record<Layer, string> = {
@@ -45,17 +65,23 @@ export const LAYER_LABELS: Record<Layer, string> = {
 };
 
 export const EDGE_COLORS: Record<EdgeType, string> = {
-  enables: "#22c55e", // green
-  "depends-on": "#3b82f6", // blue
-  contradicts: "#ef4444", // red
+  "is-a": "#06b6d4", // cyan
   "part-of": "#a855f7", // purple
+  "depends-on": "#3b82f6", // blue
+  enables: "#22c55e", // green
+  instantiates: "#f59e0b", // amber
+  contradicts: "#ef4444", // red
+  "analogous-to": "#94a3b8", // slate
 };
 
 export const EDGE_LABELS: Record<EdgeType, string> = {
-  enables: "启用",
-  "depends-on": "依赖",
-  contradicts: "矛盾",
+  "is-a": "是…的一种",
   "part-of": "组成",
+  "depends-on": "依赖",
+  enables: "启用",
+  instantiates: "实例化",
+  contradicts: "矛盾",
+  "analogous-to": "类比",
 };
 
 export const NODE_RADIUS: Record<Layer, number> = {

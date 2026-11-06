@@ -1,5 +1,5 @@
 /* =============================================
-   x-concepts viz — Global Styles
+   x-sage viz — Global Styles
    Dark theme, CJK support, force-graph styling
    ============================================= */
 
@@ -476,6 +476,21 @@ html, body, #root {
   color: #d8b4fe;
 }
 
+.edge-type-is-a {
+  background: rgba(6, 182, 212, 0.15);
+  color: #67e8f9;
+}
+
+.edge-type-instantiates {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fcd34d;
+}
+
+.edge-type-analogous-to {
+  background: rgba(148, 163, 184, 0.15);
+  color: #cbd5e1;
+}
+
 /* =============================================
    Loading & Error States
    ============================================= */
@@ -539,6 +554,35 @@ html, body, #root {
   color: var(--text-muted);
   font-size: 13px;
   max-width: 400px;
+}
+
+.error-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  max-width: 400px;
+  margin: 0;
+}
+
+.error-hint code {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
+.error-retry {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 20px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.error-retry:hover {
+  filter: brightness(1.1);
 }
 
 /* =============================================

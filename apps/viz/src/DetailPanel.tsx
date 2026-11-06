@@ -15,15 +15,15 @@ function getChineseName(node: GraphNode): string {
   return node.id;
 }
 
-function getEdgeTypeClass(type: EdgeType): string {
-  switch (type) {
-    case "enables": return "edge-type-enables";
-    case "depends-on": return "edge-type-depends-on";
-    case "contradicts": return "edge-type-contradicts";
-    case "part-of": return "edge-type-part-of";
-    default: return "";
-  }
-}
+const EDGE_TYPE_CLASSES: Record<EdgeType, string> = {
+  "is-a": "edge-type-is-a",
+  "part-of": "edge-type-part-of",
+  "depends-on": "edge-type-depends-on",
+  enables: "edge-type-enables",
+  instantiates: "edge-type-instantiates",
+  contradicts: "edge-type-contradicts",
+  "analogous-to": "edge-type-analogous-to",
+};
 
 function renderMoleculeAsHtml(molecule: string): string {
   // Simple markdown-to-HTML conversion for molecule display
@@ -60,6 +60,11 @@ export default function DetailPanel({ node, edges, allNodes, onClose }: DetailPa
     const n = allNodes.find((n) => n.id === id);
     return n ? getChineseName(n) : id;
   };
+
+  // These two lists used to read hand-maintained frontmatter arrays that had
+  // already drifted from the edge list. Read the asserted edges instead.
+  const directEdges = (type: EdgeType) =>
+    edges.filter((e) => e.from === node.id && e.type === type).map((e) => e.target);
 
   return (
     <div className={`detail-panel ${node ? "open" : ""}`}>
@@ -123,11 +128,11 @@ export default function DetailPanel({ node, edges, allNodes, onClose }: DetailPa
         </div>
 
         {/* Requires */}
-        {node.requires.length > 0 && (
+        {directEdges("depends-on").length > 0 && (
           <div className="detail-section">
             <div className="detail-section-title">依赖</div>
             <ul className="detail-edge-list">
-              {node.requires.map((id) => (
+              {directEdges("depends-on").map((id) => (
                 <li key={id} className="detail-edge-item">
                   <span
                     className="filter-color-dot"
@@ -141,11 +146,11 @@ export default function DetailPanel({ node, edges, allNodes, onClose }: DetailPa
         )}
 
         {/* Enables */}
-        {node.enables.length > 0 && (
+        {directEdges("enables").length > 0 && (
           <div className="detail-section">
             <div className="detail-section-title">启用</div>
             <ul className="detail-edge-list">
-              {node.enables.map((id) => (
+              {directEdges("enables").map((id) => (
                 <li key={id} className="detail-edge-item">
                   <span
                     className="filter-color-dot"
@@ -169,7 +174,7 @@ export default function DetailPanel({ node, edges, allNodes, onClose }: DetailPa
                 const otherName = getNodeName(otherId);
                 return (
                   <li key={idx} className="detail-edge-item">
-                    <span className={`detail-edge-type ${getEdgeTypeClass(edge.type)}`}>
+                    <span className={`detail-edge-type ${EDGE_TYPE_CLASSES[edge.type]}`}>
                       {EDGE_LABELS[edge.type]}
                     </span>
                     <span>

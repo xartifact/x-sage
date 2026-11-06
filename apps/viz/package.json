@@ -1,5 +1,5 @@
 {
-  "name": "@x-concepts/viz",
+  "name": "@x-sage/viz",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@x-concepts/core": "workspace:*",
+    "@x-sage/core": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "d3": "^7.9.0"

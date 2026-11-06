@@ -9,7 +9,7 @@ interface FilterControlsProps {
 }
 
 const LAYERS: Layer[] = [0, 1, 2, 3];
-const EDGE_TYPES: EdgeType[] = ["enables", "depends-on", "contradicts", "part-of"];
+const EDGE_TYPES: EdgeType[] = ["is-a", "part-of", "depends-on", "enables", "instantiates", "contradicts", "analogous-to"];
 
 export default function FilterControls({
   visibleLayers,
