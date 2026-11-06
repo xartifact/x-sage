@@ -1,17 +1,55 @@
-# AGENTS.md — x-concepts 项目 AI 工作手册
+# AGENTS.md — x-sage 项目 AI 工作手册
 
 ## 项目定位
 
-x-concepts 是一个 **AI-Native 概念知识库系统**。
+x-sage 是一个 **AI-Native 概念知识库系统**。
 不同于传统数据库（面向机器检索）和传统文档（面向人类阅读），
 本系统为大模型的推理模式从头设计：结构化元数据驱动按需激活，而非语义相似度。
 
 ## 当前阶段
 
-**设计阶段** — 主要输出设计文档，不编写实现代码。
-代码文件（`src/`）中的空文件是占位符，等待阶段切换后实现。
+**实现阶段** — 已有可运行的核心、service 层、CLI、HTTP 服务与可视化。
+KB 内容（`kb/default/`）仍在扩充：L0/L1 稳定，L2/L3 持续新增。
 
 ---
+
+## 仓库结构
+
+```
+x-sage/
+├── packages/
+│   ├── core/      # 纯函数：解析、图算法、schema（无 I/O 副作用入口）
+│   └── service/   # 用例 + 路由 + 渲染（handleRequest / render.ts；不依赖 hono）
+├── apps/
+│   ├── cli/       # REST 客户端：只发 HTTP 请求，不读 KB
+│   ├── server/    # HTTP 适配器：鉴权/压缩/上限 + 静态托管（生产单端口）
+│   └── viz/       # SPA：只从 /api/viz 取数
+├── kb/<kb-id>/    # 知识库数据（概念 markdown 是唯一真源）
+└── docs/          # 设计文档
+```
+
+**分层约束**：`service` 不依赖 `hono`；路由与文本渲染都只在 `service`
+（`api.ts` 的 `handleRequest`、`render.ts`）。`apps/server` 是唯一对外入口，
+`apps/cli` 与 `apps/viz` 都只是它的 REST 客户端 —— **没有本地模式**，
+客户机不携带任何 KB 数据。
+
+## 验证命令
+
+```bash
+bun run ci          # typecheck + 契约测试 + 全部测试 + KB 校验
+bun run typecheck   # 5 个包
+bun test            # 114 个测试，约 0.6s
+
+# 交互式使用需要先起服务（CLI 是纯客户端，没有本地模式）
+bun run server &
+x-sage --server http://127.0.0.1:3001 validate --graph
+```
+
+测试覆盖四层契约：`packages/core`（关系代数、闭包、环、层向）、
+`packages/service`（真实 KB 的集成行为）、`apps/server`（HTTP 状态码与载荷、
+写保护）、`apps/cli`（退出码、stdout，以及远程/本地逐字节一致）、
+`scripts/`（CI 与镜像契约）。**改动语义层前先跑 `bun test`** —— 它保护的是
+`contradicts` 对称性、`depends-on` 传递闭包、入向查询这几条容易被无意破坏的规则。
 
 ## 知识库结构
 
@@ -53,8 +91,6 @@ domain: [product, personal-thought]
 confidence: confirmed | hypothetical | contested
 source: personal | domain | synthesis
 triggers: [关键词A, 关键词B]
-requires: [prerequisite-concept-id]
-enables: [downstream-concept-id]
 edges:
   - type: is-a | part-of | depends-on | enables | contradicts | instantiates | analogous-to
     target: concept-id           # 本 KB 内引用
@@ -94,7 +130,7 @@ LOAD-NEXT: [recommended-id-1, recommended-id-2]
 {molecule 内容}
 ```
 
-`LOAD-NEXT` 由 `enables` 字段静态提供，后续可升级为动态计算。
+`REQUIRES` 是 `depends-on` 的传递闭包，`LOAD-NEXT` 是直接 `enables`；两者都在服务端算好后随响应下发。
 
 ### `--format human`（面向阅读）
 
@@ -112,10 +148,10 @@ LOAD-NEXT: [recommended-id-1, recommended-id-2]
 
 | 查询 | 人类默认 | AI 默认 |
 |------|---------|---------|
-| `get <id>` | human | ai |
-| `search <keyword>` | manifest | manifest |
-| `activate <id>` | human | ai（多个拼接）|
-| `traverse <id> <depth>` | manifest | ai（带边结构）|
+| `activate <id>` | `--format human` → markdown | 默认 text（AI 格式）|
+| `search <keyword>` | text | text（`--format manifest` → 表格）|
+| `edges <id>` | text | text（`--json` → JSON）|
+| `validate` | text | text（`--json` → JSON）|
 
 ---
 
@@ -127,7 +163,7 @@ LOAD-NEXT: [recommended-id-1, recommended-id-2]
 |------------|---------|
 | 上下文窗口有硬性上限 | 三层激活：MANIFEST 永驻，概念文件按需加载 |
 | 注意力是稀疏的 | triggers + 类型化边驱动激活路径 |
-| 推理是路径依赖的 | `requires` 边保证前置概念先行加载 |
+| 推理是路径依赖的 | `depends-on` 的传递闭包保证前置概念先行加载 |
 | 无持久记忆 | Checkpoint + frontier 跨会话保留进度 |
 | 可以写，不只读 | AI 有标准写回路径（proposals/ 目录）|
 
@@ -171,6 +207,8 @@ AI 可执行的写回操作：
 | [l1-candidates.md](docs/l1-candidates.md) | L1 核心概念候选（目标、约束、决策、需求、风险）|
 | [concept-reshaping-cognition.md](docs/concept-reshaping-cognition.md) | 概念如何重塑 AI 认知行为和目标 |
 | [concept-checkpoint-sessions.md](docs/concept-checkpoint-sessions.md) | 复杂概念的跨会话管理机制 |
+| [edge-semantics.md](docs/edge-semantics.md) | 边类型的关系代数、读取时推理与双真源收敛记录 |
+| [deployment.md](docs/deployment.md) | Docker/CI 部署、x99 上线、版本断言与故障排查 |
 
 ---
 

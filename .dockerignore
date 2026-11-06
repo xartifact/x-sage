@@ -1,0 +1,13 @@
+.git
+# dist 由 CI 作为 artifact 传入，或由 Dockerfile 就地构建。
+# 若允许它进入上下文，PREBUILT_VIZ=false 时会静默使用本地可能过期的产物。
+apps/viz/dist
+.github
+node_modules
+apps/*/node_modules
+packages/*/node_modules
+**/.DS_Store
+docs
+.omo
+*.md
+!kb/**/*.md

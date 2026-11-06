@@ -1,4 +1,4 @@
-# x-concepts：面向大模型的概念知识库架构
+# x-sage：面向大模型的概念知识库架构
 
 ## 设计背景
 
@@ -25,7 +25,7 @@ AI 的认知模式有五个关键特征，系统必须逐一响应：
 |------------|---------|
 | 上下文窗口是工作记忆，有硬性上限 | 三层激活模型：MANIFEST 永驻，概念文件按需加载 |
 | 注意力是稀疏的，相关信息需要显式激活 | triggers 字段 + 类型化边驱动激活路径 |
-| 推理是路径依赖的，加载顺序影响结论 | `requires` 边保证前置概念先于后置概念加载 |
+| 推理是路径依赖的，加载顺序影响结论 | `depends-on` 边的传递闭包保证前置概念先于后置概念加载 |
 | 无持久记忆，每次会话需重建上下文 | Checkpoint + frontier 机制跨会话保留进度 |
 | 可以写，不只是读 | AI 有标准写回路径，贡献新边、更新 atom、标记张力 |
 
@@ -83,24 +83,34 @@ confidence: contested    # 存在已知对立观点，需要辩证处理
 ### 第三层：图拓扑文件（机器可读）
 
 `graph.json` —— 编码所有节点和**类型化的边**。
-边不是无差别的"相关性"，而是语义类型：
+边不是无差别的"相关性"，而是有代数性质的语义关系。这张表的实现是
+`packages/core/src/graph/semantics.ts` 的 `RELATION_SPECS`，校验器与遍历器都按它执行。
 
-| 边类型 | 含义 | 推理用途 |
-|--------|------|----------|
-| `is-a` | 分类关系 | 归纳/演绎 |
-| `part-of` | 组合关系 | 整体理解 |
-| `depends-on` | 前置条件 | 推演顺序 |
-| `enables` | 解锁关系 | 发现链 |
-| `contradicts` | 矛盾张力 | 辩证分析 |
-| `instantiates` | 抽象→具体 | 举例验证 |
-| `analogous-to` | 跨域类比 | 迁移推理 |
+| 边类型 | 含义 | 推理用途 | 传递 | 对称 | 无环 | 层向 |
+|--------|------|----------|------|------|------|------|
+| `is-a` | 分类关系 | 归纳/演绎 | 是 | 否 | 是 | 指向同层或更抽象 |
+| `part-of` | 组合关系 | 整体理解 | 是 | 否 | 是 | 指向同层或更抽象 |
+| `depends-on` | 前置条件 | 推演顺序 | 是 | 否 | 是 | 不限 |
+| `enables` | 解锁关系 | 发现链 | 否 | 否 | 否 | 不限 |
+| `instantiates` | 抽象→具体 | 举例验证 | 否 | 否 | 是 | 指向同层或更抽象 |
+| `contradicts` | 辩证张力 | 辩证分析 | 否 | 是 | 否 | 不限 |
+| `analogous-to` | 跨域类比 | 迁移推理 | 否 | 是 | 否 | 不限 |
+
+三个刻意的非本体决定：
+
+- **`enables` 不是 `depends-on` 的逆。** `risk` 与 `decision` 互为因果、互相 enable，
+  但没有加载先后。若把它当逆属性派生，会造出 `decision → risk → decision` 的假环。
+- **`contradicts` 不是 `owl:disjointWith`。** 一个概念可以是 X 的特例同时又与 X 张力对立
+  （`goal-drift`、`latent-goal`、`pseudo-need`），因此不做互斥校验——那是这个 KB 最有价值的结构。
+- **`confidence` 是本体没有的维度。** 传递闭包上取路径最弱置信度：
+  结论的可信度不会高于链上最弱的一环。
 
 ---
 
 ## 文件结构
 
 ```
-x-concepts/
+x-sage/
 ├── AI.md                    # 自说明入口：AI 读此文件即可独立使用整个系统
 ├── MANIFEST.md              # 全局原子索引（永远加载）
 ├── graph.json               # 机器可读的图拓扑
@@ -141,8 +151,6 @@ layer: 1
 domain: [philosophy, product]
 confidence: confirmed
 triggers: [关键词A, 关键词B]
-requires: [prerequisite-concept-id]
-enables: [downstream-concept-id-1, downstream-concept-id-2]
 edges:
   - {type: is-a, target: parent-concept, confidence: confirmed}
   - {type: contradicts, target: opposing-concept, confidence: confirmed}
@@ -191,9 +199,151 @@ edges:
 | 相似性来源 | 嵌入距离（隐式，模型学到的） | 显式边类型（作者意图） |
 | 矛盾表达 | 相似度高≈相关，无法区分对立 | `contradicts` 边明确编码 |
 | 推理路径 | 黑箱检索 | 可解释的图遍历 |
-| 前提依赖 | 无 | `requires` 边保证顺序 |
+| 前提依赖 | 无 | `depends-on` 传递闭包保证顺序 |
 | 维护成本 | 需要重新嵌入 | 直接编辑 markdown |
 | AI 可操作性 | 需要专用工具 | 直接 read/grep 即可 |
+
+---
+
+## 读取时推理
+
+概念文件只写**直接**关系，可推导的部分在读取时计算，避免手写副本漂移：
+
+| 计算 | 函数 | 效果 |
+|------|------|------|
+| 对称补全 | `completeSymmetricEdges` | `contradicts` / `analogous-to` 只写一个方向，反向自动补 |
+| 传递闭包 | `transitiveClosure` | `is-a` / `part-of` / `depends-on` 推出全部可达边，`derived` 字段记见证路径 |
+| 环检测 | `findEdgeCycles` | 对声明无环的关系报错，单环只报一次 |
+| 层向校验 | `layerViolation` | `instantiates` / `is-a` / `part-of` 不得指向更具体的层 |
+
+早期版本的 frontmatter 同时有 `requires` / `enables` 数组和 `edges` 列表，
+实测 18 条 `enables` 中 8 条与边不一致，两个真源已删除，边是唯一来源。
+
+---
+
+## 进程架构：标准 C/S + B/S
+
+**服务端是唯一读得到知识库的组件。** 所有客户端——CLI、浏览器、未来的任意宿主——
+都通过同一套 REST API 访问；服务端把结果渲染成 JSON 或文本。因此不存在「客户端 A
+和客户端 B 行为不一致」这类问题：只有一个实现点。
+
+```
+                      ┌──────────────────────────┐
+                      │  packages/core           │  纯函数：解析、图算法、schema
+                      └────────────▲─────────────┘
+                                   │
+                      ┌────────────┴─────────────┐
+                      │  packages/service        │  用例 + 路由 + 渲染
+                      │  api.ts  handleRequest   │  (ctx, request) → {status, body}
+                      │  render.ts               │
+                      └────────────▲─────────────┘
+                                   │
+                      ┌────────────┴─────────────┐
+                      │  apps/server (Hono)      │  唯一入口：鉴权/gzip/体积/静态
+                      └────────────▲─────────────┘
+                                   │ HTTP /api/*
+                 ┌─────────────────┼─────────────────┐
+        ┌────────┴───────┐ ┌───────┴────────┐ ┌──────┴────────┐
+        │ apps/cli       │ │ apps/viz (SPA) │ │ 任意第三方     │
+        │ REST 客户端    │ │ REST 客户端    │ │ REST 客户端    │
+        └────────────────┘ └────────────────┘ └───────────────┘
+```
+
+### 关键约束
+
+| 约束 | 理由 |
+|---|---|
+| **没有本地模式** | CLI 只有 `--server`；它不读 KB、不带图算法，客户机可以是空的 |
+| 路由只在 `service/src/api.ts` | 一个 `handleRequest`，HTTP 是它唯一的对外形态 |
+| 渲染只在服务端（`render.ts`） | 文本格式只有一个实现点；换客户端不改行为 |
+| `service` 不依赖 Hono | Hono 只做传输层（鉴权/gzip/静态），业务与路由可独立测试 |
+| API 是 RESTful 的 | 写操作按 `PUT`（幂等重建）/`POST`（创建）区分 |
+| `apps/viz` 只认 `/api/viz` | 没有落盘数据可以过期 |
+
+CLI 是薄传输层：解析 argv → 拼一个 HTTP 请求 → 打印响应体 → 透传退出码。
+它对本仓库唯一的知识是「命令到路径」的映射。
+
+### 启动
+
+```bash
+# 服务端（开发）
+bun run server     # → http://127.0.0.1:3001
+
+# 前端开发（Vite 把 /api 代理到 3001）
+bun run viz        # → http://localhost:5173
+
+# 生产：单进程同时托管 API 与构建产物
+bun run build      # 构建 apps/viz/dist
+bun run server     # → http://127.0.0.1:3001 同时提供 / 与 /api
+
+# 客户端：任何机器，只要网络可达
+x-sage --server https://x-sage.example.com activate decision
+```
+
+### 环境变量
+
+**服务端**
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `X_SAGE_KB` | `<repo>/kb/default` | 服务哪个知识库 |
+| `PORT` / `HOST` | `3001` / `127.0.0.1` | 监听地址（默认不对外暴露） |
+| `CORS_ORIGIN` | `*` | 允许的来源 |
+| `X_SAGE_WEB_DIST` | `apps/viz/dist` | 静态资源目录，不存在则只提供 API |
+| `X_SAGE_WRITE_TOKEN` | 未设置 | 设置后所有写请求需要 Bearer token |
+| `APP_VERSION` / `GIT_COMMIT_HASH` / `BUILD_REF` | `dev`/`unknown` | 由镜像固化，见 [deployment.md](deployment.md) |
+
+**客户端**
+
+| 变量 | 作用 |
+|---|---|
+| `X_SAGE_SERVER` | 等价于 `--server` |
+| `X_SAGE_TOKEN` | 等价于 `--token` |
+
+### REST API
+
+资源路径，动作用 HTTP 方法表达。读端点默认返回 JSON，可用 `format` 协商：
+`text`（AI 文本）、`markdown`（概念原文）、`manifest`（表格）。
+
+| 方法 | 路径 | 语义 |
+|---|---|---|
+| GET | `/api/health` | 存活、当前 KB、构建身份 |
+| GET | `/api/meta` | 节点/边计数 |
+| GET | `/api/manifest` | MANIFEST 全文（AI 开卷第一步） |
+| PUT | `/api/manifest` | 重建并落盘 MANIFEST.md（幂等） |
+| GET | `/api/graph?semantic=true` | 图；`semantic` 含派生边 |
+| PUT | `/api/graph` | 由概念文件重建 graph.json（幂等；`{"manifest":true}` 一并重建 MANIFEST） |
+| GET | `/api/viz` | 可视化完整载荷（含 molecule 与 meta） |
+| GET | `/api/search?q=` | 关键词检索 |
+| GET | `/api/concepts/:id?strategy=&depth=` | 激活：概念 + 邻域 |
+| GET | `/api/concepts/:id/edges?type=&dir=` | 边查询；`dir=in` 即「谁指向它」 |
+| GET | `/api/path?from=&to=` | 最短路径 |
+| GET | `/api/validate?graph=true` | 校验；不通过返回 422 |
+| GET | `/api/frontier` | 未解张力 |
+| GET | `/api/proposals` | 待审提案（边 + atom） |
+| POST | `/api/proposals` | 新建提案；body 的 `kind` 为 `edge` 或 `atom` |
+| POST | `/api/proposals/merge` | 合并提案回概念文件（`/merge` 是业界惯例，保留） |
+| GET | `/api/checkpoints/:concept?session=` | 读快照（缺省取最新） |
+| POST | `/api/checkpoints/:concept` | 建空骨架（201） |
+| PUT | `/api/checkpoints/:concept` | 覆盖保存完整快照 |
+
+**为什么这样分**：重建 graph/MANIFEST 是幂等的（同样输入必得同样输出），所以用 `PUT`；
+创建提案每次产生新文件，所以用 `POST`；两种提案共用集合路径，类型放在 body 的 `kind`，
+避免用子路径编码动作。
+
+### 写保护
+
+`X_SAGE_WRITE_TOKEN` 设置后，所有 `POST`/`PUT`/`PATCH`/`DELETE` 必须有
+`Authorization: Bearer <token>`（常量时间比较，先比长度避免抛错）。
+未设置且 `HOST` 非回环时，server 拒绝启动而不是静默开放写入口。
+请求体上限 256 KB，响应按 `Accept-Encoding` gzip。
+
+### 打包客户端
+
+```bash
+bun build apps/cli/src/index.ts --compile --outfile x-sage   # 约 60 MB，目标机无需 bun
+bun build apps/cli/src/index.ts --target=bun --outfile x-sage.js  # 0.3 MB，需 bun
+```
 
 ---
 

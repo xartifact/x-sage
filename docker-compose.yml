@@ -1,0 +1,54 @@
+# x-sage 生产部署（单进程：API + 静态前端，同端口）
+#
+# 用法（本地）：
+#   cp .env.example .env && vim .env
+#   docker compose up -d --build
+#
+# 用法（x99，CI 自动执行）：
+#   cd /opt/xartifact/x-sage && docker compose up -d
+#
+# KB 数据默认烘焙在镜像里（/app/kb）。要在服务器上改概念文件而不重建镜像，
+# 把下面的 kb_data 挂载取消注释，并让宿主目录至少有完整的 kb/default 结构。
+services:
+  x-sage:
+    image: ghcr.io/xartifact/x-sage:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        GIT_COMMIT_HASH: ${GIT_COMMIT_HASH:-unknown}
+        BUILD_REF: ${BUILD_REF:-unknown}
+    container_name: x-sage
+    restart: unless-stopped
+    environment:
+      # APP_VERSION / GIT_COMMIT_HASH / BUILD_REF 故意不在此声明：它们由 CI 通过
+      # build-args 固化进镜像 ENV。若在这里写 ${GIT_COMMIT_HASH:-unknown}，运行时
+      # 的空值会覆盖镜像里的正确版本，部署侧的版本断言就永远对不上。
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      X_SAGE_KB: /app/kb/default
+      # 写操作（提案、重建、checkpoint）必须带 Bearer token。必须给值：
+      # 容器固定以 HOST=0.0.0.0 启动，server 在无 token 时会拒绝启动而不是
+      # 静默开放写入口。
+      X_SAGE_WRITE_TOKEN: ${X_SAGE_WRITE_TOKEN:?set X_SAGE_WRITE_TOKEN in .env}
+    ports:
+      - '${HOST_PORT:-3001}:3000'
+    healthcheck:
+      # 容器内自检，与 Dockerfile 的 HEALTHCHECK 一致；端口是容器内的 3000，
+      # 不受宿主端口映射影响。
+      test:
+        [
+          'CMD-SHELL',
+          'bun -e "fetch(\"http://localhost:3000/api/health\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    volumes:
+      # KB 必须以可写方式挂出来：客户端写入的提案、checkpoint、重建后的
+      # graph.json 都落在这里。用镜像内的副本会在每次重建时被覆盖。
+      - ./data/kb:/app/kb

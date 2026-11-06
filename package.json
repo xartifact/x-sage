@@ -1,5 +1,5 @@
 {
-  "name": "x-concepts",
+  "name": "x-sage",
   "version": "0.1.0",
   "private": true,
   "description": "LLM-native concept knowledge graph",
@@ -9,11 +9,15 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "bun run --filter='@x-concepts/*' build",
-    "cli": "bun run --filter @x-concepts/cli dev",
-    "viz": "bun run --filter @x-concepts/viz dev",
-    "typecheck": "bun run --filter='@x-concepts/*' typecheck",
-    "validate": "bun run --filter @x-concepts/cli validate"
+    "build": "bun run --filter='@x-sage/*' build",
+    "dev": "bun run --filter @x-sage/server dev",
+    "server": "bun run --filter @x-sage/server dev",
+    "cli": "bun run --filter @x-sage/cli dev",
+    "viz": "bun run --filter @x-sage/viz dev",
+    "typecheck": "bun run --filter='@x-sage/*' typecheck",
+    "validate": "bun run --filter @x-sage/cli validate",
+    "test": "bun test",
+    "ci": "./scripts/ci.sh"
   },
   "devDependencies": {
     "@types/bun": "latest",

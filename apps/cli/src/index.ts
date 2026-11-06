@@ -32,6 +32,12 @@ function emitJsonError(message: string): never {
   process.exit(1);
 }
 
+/** Usage text is informational, but the invocation still failed. */
+function emitUsageError(message: string): never {
+  process.stdout.write(`${message}\n`);
+  process.exit(1);
+}
+
 /** Split argv into `--flag value`, bare `--flag`, and positionals. */
 function parseArgs(args: string[]): {
   flags: Record<string, string>;
@@ -204,7 +210,7 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
       emitJsonError(`Checkpoint subcommands:
   checkpoint create <concept-id> [session]   Create an empty checkpoint skeleton
   checkpoint read <concept-id> [session]     Read a checkpoint (defaults to latest)
-  checkpoint save <file>                     Write a checkpoint from a JSON file
+  checkpoint save -                          Write a checkpoint read from stdin
 `);
     }
 
@@ -291,7 +297,8 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
     }
 
     default:
-      emitJsonError(usage());
+      // Unknown command is a usage error, not a successful invocation.
+      emitUsageError(usage());
   }
 }
 
@@ -323,7 +330,7 @@ Write-back (needs --token when the server requires one):
   refine-atom <concept-id> --atom "text" [--reason "text"]
   proposals list | proposals merge [file|all]
   frontier list
-  checkpoint create <id> [session] | checkpoint read <id> [session]
+  checkpoint create <id> [session] | read <id> [session] | save -   (save reads stdin)
 
 Graph:
   graph generate [--manifest]           Rebuild graph.json (+ MANIFEST.md)
@@ -393,10 +400,10 @@ async function main(): Promise<void> {
   const tokenFlag = takeFlag("token");
 
   const command = allArgs[0];
-  if (command === undefined) emitJsonError(usage());
+  if (command === undefined) emitUsageError(usage());
 
-  // `checkpoint save -` streams a checkpoint in. A remote client cannot read a
-  // server-side path, so stdin is the only transfer that works in both modes.
+  // `checkpoint save -` streams a checkpoint in: a client cannot read a
+  // server-side path, so stdin is the only transfer that works remotely.
   let stdinCheckpoint: unknown;
   if (command === "checkpoint" && allArgs[1] === "save" && allArgs[2] === "-") {
     const raw = await new Response(Bun.stdin.stream()).text();
