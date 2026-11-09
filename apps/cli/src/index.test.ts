@@ -176,8 +176,10 @@ describe("config file", () => {
       await mkdir(join(dir, "x-sage"), { recursive: true });
       await writeFile(join(dir, "x-sage", "config.toml"), `server = "${server.url}"\n`);
       try {
-        const { stdout, exitCode } = await run(["activate", "decision"], { XDG_CONFIG_HOME: dir });
-        expect(exitCode).toBe(0);
+        const { stdout, stderr, exitCode } = await run(["activate", "decision"], { XDG_CONFIG_HOME: dir });
+        // Surface the child's stderr: a bare `expected 0, received 1` hides
+        // whether this is a connection race or a config-resolution bug.
+        expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
         expect(stdout).toContain("[CONCEPT: decision]");
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -266,7 +268,11 @@ describe("wire contract", () => {
   for (const args of cases) {
     test(`"${args.join(" ")}" succeeds against the server`, async () => {
       const result = await againstServer([...args]);
-      expect(result.exitCode).toBe(0);
+      // Include stderr so a failure names the cause instead of just "expected 0".
+      expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
       expect(result.stdout.length).toBeGreaterThan(0);
     });
   }

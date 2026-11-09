@@ -14,6 +14,9 @@ import {
   semanticGraph,
   validateConcepts,
   validateGraphState,
+  submitEdgeProposal,
+  mergeProposals,
+  findConceptFile,
 } from "../src/index.ts";
 
 /**
@@ -214,6 +217,72 @@ describe("validation", () => {
       const report = await validateGraphState(kb(dir));
       expect(report.valid).toBe(false);
       expect(report.staleness?.missing.length).toBeGreaterThan(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+describe("proposal merge is idempotent", () => {
+  test("a second merge does not duplicate the edge", async () => {
+    // merge writes the concept file and then the proposal's `approved` status.
+    // A crash between the two used to leave the edge applied but the proposal
+    // still pending, so the retry appended a duplicate.
+    const dir = await copyKb();
+    try {
+      const ctx = kb(dir);
+      const file = await submitEdgeProposal(ctx, {
+        from: "risk",
+        type: "analogous-to",
+        target: "goal",
+        confidence: "hypothetical",
+      });
+
+      const first = await mergeProposals(ctx, file);
+      expect(first.merged).toContain(file);
+      expect(first.failed).toHaveLength(0);
+
+      const afterFirst = await findConceptFile(ctx, "risk");
+      const count = afterFirst.file.frontmatter.edges.filter(
+        (edge) => edge.type === "analogous-to" && edge.target === "goal",
+      ).length;
+      expect(count).toBe(1);
+
+      // Second merge of the same file: reported as merged (the outcome the
+      // caller expects) but must not add a second edge.
+      const second = await mergeProposals(ctx, file);
+      expect(second.failed).toHaveLength(0);
+
+      const afterSecond = await findConceptFile(ctx, "risk");
+      const countAgain = afterSecond.file.frontmatter.edges.filter(
+        (edge) => edge.type === "analogous-to" && edge.target === "goal",
+      ).length;
+      expect(countAgain).toBe(1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("concurrent merges of different proposals are all applied", async () => {
+    // Without the KB lock both writers read the same concept file and one edit
+    // is lost; the lock makes this deterministic.
+    const dir = await copyKb();
+    try {
+      const ctx = kb(dir);
+      const a = await submitEdgeProposal(ctx, {
+        from: "risk", type: "analogous-to", target: "goal", confidence: "hypothetical",
+      });
+      const b = await submitEdgeProposal(ctx, {
+        from: "risk", type: "analogous-to", target: "need", confidence: "hypothetical",
+      });
+
+      await Promise.all([mergeProposals(ctx, a), mergeProposals(ctx, b)]);
+
+      const concept = await findConceptFile(ctx, "risk");
+      const targets = concept.file.frontmatter.edges
+        .filter((edge) => edge.type === "analogous-to")
+        .map((edge) => edge.target)
+        .sort();
+      expect(targets).toEqual(["goal", "need"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

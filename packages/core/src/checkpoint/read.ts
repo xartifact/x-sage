@@ -1,4 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { writeFileAtomic } from "../fs/atomic.ts";
 import { join } from "node:path";
 import { CheckpointSchema, type Checkpoint } from "../types/index.ts";
 
@@ -20,5 +21,5 @@ export async function readCheckpoint(checkpointsDir: string, conceptId: string, 
  */
 export async function writeCheckpoint(checkpointsDir: string, checkpoint: Checkpoint): Promise<void> {
   const filePath = join(checkpointsDir, `${checkpoint.concept}-s${checkpoint.session}.json`);
-  await writeFile(filePath, JSON.stringify(checkpoint, null, 2), "utf-8");
+  await writeFileAtomic(filePath, JSON.stringify(checkpoint, null, 2));
 }

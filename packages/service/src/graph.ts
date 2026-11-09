@@ -10,7 +10,8 @@ import {
   type GraphValidationIssue,
 } from "@x-sage/core";
 import { generateGraph as coreGenerateGraph } from "@x-sage/core/graph";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { writeFileAtomic } from "@x-sage/core/fs";
 import { graphFile, type KbContext } from "./kb.ts";
 
 /**
@@ -46,7 +47,7 @@ export async function readStoredGraph(ctx: KbContext): Promise<Graph | null> {
 /** Regenerate and persist `graph.json`. */
 export async function writeGraph(ctx: KbContext): Promise<Graph> {
   const graph = await buildGraph(ctx);
-  await writeFile(graphFile(ctx), JSON.stringify(graph, null, 2), "utf-8");
+  await writeFileAtomic(graphFile(ctx), JSON.stringify(graph, null, 2));
   return graph;
 }
 

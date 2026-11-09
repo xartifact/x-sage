@@ -12,7 +12,8 @@
     "./manifest": "./src/manifest/index.ts",
     "./checkpoint": "./src/checkpoint/index.ts",
     "./frontier": "./src/frontier/index.ts",
-    "./proposals": "./src/proposals/index.ts"
+    "./proposals": "./src/proposals/index.ts",
+    "./fs": "./src/fs/atomic.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

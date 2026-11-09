@@ -7,3 +7,7 @@ dist/
 
 # agent runtime state
 .omo/
+
+# KB 写锁（运行期临时文件，不是内容）
+*.write.lock
+kb/**/.write.lock

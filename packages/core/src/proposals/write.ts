@@ -1,4 +1,5 @@
-import { writeFile, mkdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
+import { writeFileAtomic } from "../fs/atomic.ts";
 import { join } from "node:path";
 import type { EdgeType, Confidence } from "../types/index.ts";
 
@@ -34,7 +35,7 @@ status: pending
 (待填写)
 `;
 
-  await writeFile(filePath, content, "utf-8");
+  await writeFileAtomic(filePath, content);
   return filename;
 }
 
@@ -70,6 +71,6 @@ ${params.proposedAtom}
 ${params.reason}
 `;
 
-  await writeFile(filePath, content, "utf-8");
+  await writeFileAtomic(filePath, content);
   return filename;
 }

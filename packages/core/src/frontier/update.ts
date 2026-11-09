@@ -1,4 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { writeFileAtomic } from "../fs/atomic.ts";
 import { join } from "node:path";
 
 export interface FrontierEntry {
@@ -65,7 +66,7 @@ export function parseFrontierMarkdown(raw: string): FrontierEntry[] {
  */
 export async function writeFrontier(kbPath: string, entries: FrontierEntry[]): Promise<void> {
   const content = formatFrontierMarkdown(entries);
-  await writeFile(join(kbPath, "frontier.md"), content, "utf-8");
+  await writeFileAtomic(join(kbPath, "frontier.md"), content);
 }
 
 /**

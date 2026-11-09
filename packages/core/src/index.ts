@@ -16,6 +16,11 @@ export {
 } from "./types/index.ts";
 export { formatZodError } from "./types/index.ts";
 
+// Filesystem
+export { writeFileAtomic } from "./fs/atomic.ts";
+export { withKbLock, LockTimeoutError } from "./fs/lock.ts";
+export type { LockOptions } from "./fs/lock.ts";
+
 // Manifest module
 export { parseConceptFile, formatConceptFile } from "./manifest/index.ts";
 export { generateManifest, formatManifest } from "./manifest/index.ts";

@@ -192,6 +192,29 @@ describe("deployment bootstrap", () => {
     expect(script).toContain("chmod 664");
   });
 
+  test("bootstrap does not embed its own compose copy", async () => {
+    // An embedded copy drifts from the repo silently, and the drift is what
+    // lost x99's volume: the host compose omitted `./data/kb:/app/kb`, so every
+    // write landed in the container's writable layer and vanished on recreate.
+    const script = await read("scripts/bootstrap-x99.sh");
+    expect(script).toContain("curl -fsSL");
+    expect(script).toContain("docker-compose.yml");
+    expect(script).not.toContain("<<'COMPOSE'");
+  });
+
+  test("compose mounts the KB so writes survive container recreation", async () => {
+    const compose = await read("docker-compose.yml");
+    expect(compose).toContain("./data/kb:/app/kb");
+  });
+
+  test("bootstrap seeds the volume before first boot", async () => {
+    // The bind mount hides the image's KB; an empty host dir would leave the
+    // server with nothing to serve.
+    const script = await read("scripts/bootstrap-x99.sh");
+    expect(script).toContain("docker cp");
+    expect(script).toContain("data/kb");
+  });
+
   test("bootstrap always provisions a write token", async () => {
     // The container binds 0.0.0.0, and the server refuses to start without a
     // token in that case. A bootstrap that skipped it would produce a restart

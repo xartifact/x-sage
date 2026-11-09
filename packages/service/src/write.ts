@@ -1,4 +1,7 @@
-import { readdir, writeFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
+import { writeFileAtomic } from "@x-sage/core/fs";
+import { withKbLock } from "@x-sage/core";
+import { AlreadyMergedError } from "@x-sage/core/proposals";
 import {
   CheckpointSchema,
   readCheckpoint,
@@ -154,6 +157,12 @@ export interface MergeOutcome {
  * here, so callers must regenerate and validate afterwards.
  */
 export async function mergeProposals(ctx: KbContext, target: string): Promise<MergeOutcome> {
+  // Two clients merging at once both read-modify-write the same concept file;
+  // without serialisation the later write silently discards the earlier one.
+  return withKbLock(ctx.root, () => mergeProposalsLocked(ctx, target));
+}
+
+async function mergeProposalsLocked(ctx: KbContext, target: string): Promise<MergeOutcome> {
   const outcome: MergeOutcome = { merged: [], failed: [] };
   const pending = await listProposals(ctx);
 
@@ -164,7 +173,12 @@ export async function mergeProposals(ctx: KbContext, target: string): Promise<Me
       await mergeEdgeProposal(ctx.root, proposal.file);
       outcome.merged.push(proposal.file);
     } catch (err) {
-      outcome.failed.push({ file: proposal.file, error: err instanceof Error ? err.message : String(err) });
+      // A retry after a partial failure must not be reported as an error.
+      if (err instanceof AlreadyMergedError) {
+        outcome.merged.push(proposal.file);
+      } else {
+        outcome.failed.push({ file: proposal.file, error: err instanceof Error ? err.message : String(err) });
+      }
     }
   }
 
@@ -175,7 +189,11 @@ export async function mergeProposals(ctx: KbContext, target: string): Promise<Me
       await mergeAtomProposal(ctx.root, proposal.file);
       outcome.merged.push(proposal.file);
     } catch (err) {
-      outcome.failed.push({ file: proposal.file, error: err instanceof Error ? err.message : String(err) });
+      if (err instanceof AlreadyMergedError) {
+        outcome.merged.push(proposal.file);
+      } else {
+        outcome.failed.push({ file: proposal.file, error: err instanceof Error ? err.message : String(err) });
+      }
     }
   }
 
@@ -192,7 +210,7 @@ export async function renderManifest(ctx: KbContext): Promise<string> {
 export async function writeManifest(ctx: KbContext): Promise<{ markdown: string; count: number }> {
   const rows = await generateManifest(ctx.root);
   const markdown = formatManifest(rows);
-  await writeFile(manifestFile(ctx), markdown, "utf-8");
+  await writeFileAtomic(manifestFile(ctx), markdown);
   return { markdown, count: rows.length };
 }
 
