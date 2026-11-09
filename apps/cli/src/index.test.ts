@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { resolve, join } from "node:path";
-import { mkdtemp, cp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createApp } from "../../server/src/app.ts";
 
@@ -25,12 +25,29 @@ interface Run {
   exitCode: number;
 }
 
-async function run(args: string[]): Promise<Run> {
+/**
+ * Isolated config dir for spawned CLI processes.
+ *
+ * The CLI now reads `$XDG_CONFIG_HOME/x-sage/config.toml`. Without this,
+ * a developer's real config would leak into the suite — that is exactly how
+ * the "no server configured" case started failing once config support landed.
+ * Cases that want a config file write into this dir instead.
+ */
+const SANDBOX_CONFIG = join(tmpdir(), `x-sage-cli-cfg-${process.pid}`);
+
+async function run(args: string[], env: Record<string, string> = {}): Promise<Run> {
   const proc = Bun.spawn(["bun", CLI, ...args], {
     cwd: process.cwd(),
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, X_SAGE_SERVER: "", X_SAGE_KB: "", X_SAGE_TOKEN: "" },
+    env: {
+      ...process.env,
+      X_SAGE_SERVER: "",
+      X_SAGE_KB: "",
+      X_SAGE_TOKEN: "",
+      XDG_CONFIG_HOME: SANDBOX_CONFIG,
+      ...env,
+    },
   });
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -145,6 +162,51 @@ describe("error handling", () => {
     const { stderr, exitCode } = await run(["activate", "decision"]);
     expect(exitCode).toBe(1);
     expect(stderr).toContain("No server configured");
+  });
+});
+
+describe("config file", () => {
+  test("a config file alone is enough to reach the server", async () => {
+    // The point of the file: `x-sage activate x` with no flags and no exports.
+    const server = serve();
+    try {
+      // configPath joins <XDG_CONFIG_HOME>/x-sage/config.toml, so the file must
+      // live one level down — writing it at the root silently configures nothing.
+      const dir = await mkdtemp(join(tmpdir(), "x-sage-cfgcli-"));
+      await mkdir(join(dir, "x-sage"), { recursive: true });
+      await writeFile(join(dir, "x-sage", "config.toml"), `server = "${server.url}"\n`);
+      try {
+        const { stdout, exitCode } = await run(["activate", "decision"], { XDG_CONFIG_HOME: dir });
+        expect(exitCode).toBe(0);
+        expect(stdout).toContain("[CONCEPT: decision]");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("flags override the config file", async () => {
+    // A wrong server in the file must not beat an explicit --server.
+    const server = serve();
+    try {
+      const dir = await mkdtemp(join(tmpdir(), "x-sage-cfgcli-"));
+      await mkdir(join(dir, "x-sage"), { recursive: true });
+      await writeFile(join(dir, "x-sage", "config.toml"), 'server = "http://127.0.0.1:1"\n');
+      try {
+        const { stdout, exitCode } = await run(
+          ["--server", server.url, "activate", "decision"],
+          { XDG_CONFIG_HOME: dir },
+        );
+        expect(exitCode).toBe(0);
+        expect(stdout).toContain("[CONCEPT: decision]");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    } finally {
+      server.stop();
+    }
   });
 });
 

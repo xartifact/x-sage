@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import type { ApiMethod, ApiResponse } from "@x-sage/service";
+import { configPath, resolveTarget } from "./config.ts";
 
 /**
  * x-sage CLI — a REST client.
@@ -308,8 +309,13 @@ function usage(): string {
 Usage: x-sage <command> [args] [flags]
 
 Connection:
-  --server <url>                        Server base URL (also X_SAGE_SERVER)
-  --token <token>                       Bearer token for write commands (also X_SAGE_TOKEN)
+  --server <url>                        Server base URL
+  --token <token>                       Bearer token for write commands
+
+  Resolution: flags > environment > config file.
+    X_SAGE_SERVER / X_SAGE_TOKEN        environment
+    ~/.config/x-sage/config.toml        server = "...", token = "..."
+                                        (honours XDG_CONFIG_HOME)
 
 Every command is one HTTP request against the server's REST API; the client
 holds no kb data and never touches the filesystem.
@@ -425,24 +431,22 @@ async function main(): Promise<void> {
         ? "text/markdown"
         : "application/json";
 
-  // An empty environment variable means "not configured", not "empty value".
-  const fromEnv = (name: string): string | undefined => {
-    const value = process.env[name];
-    return value === undefined || value === "" ? undefined : value;
-  };
+  // Flags beat environment variables, which beat the config file. A config file
+  // exists so the common case needs no shell exports at all.
+  const target = resolveTarget({
+    ...(serverFlag === undefined ? {} : { server: serverFlag }),
+    ...(tokenFlag === undefined ? {} : { token: tokenFlag }),
+  });
 
-  const server = serverFlag ?? fromEnv("X_SAGE_SERVER");
-  const token = tokenFlag ?? fromEnv("X_SAGE_TOKEN");
-
-  if (server === undefined) {
+  if (target.server === undefined) {
     emitJsonError(
       "No server configured.\n" +
-        "  x-sage --server https://x-sage.example.com activate decision\n" +
-        "  or set X_SAGE_SERVER.",
+        `  write ${configPath()} with:  server = "https://x-sage.example.com"\n` +
+        "  or pass --server, or set X_SAGE_SERVER.",
     );
   }
 
-  await runRemote(server, invocation, accept, token);
+  await runRemote(target.server, invocation, accept, target.token);
 }
 
 main().catch((err: unknown) => {
