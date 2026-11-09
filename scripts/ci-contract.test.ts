@@ -180,6 +180,34 @@ describe("build identity wiring", () => {
   });
 });
 
+describe("deployment bootstrap", () => {
+  test("bootstrap script keeps the runner able to read the deploy dir", async () => {
+    // The CI deploy job runs as github-actions and must be able to read
+    // docker-compose.yml. Handing the directory solely to a human user would
+    // break every subsequent deploy, so the script sets a shared group plus
+    // setgid rather than a plain chown.
+    const script = await read("scripts/bootstrap-x99.sh");
+    expect(script).toContain("chmod 2775");
+    expect(script).toContain("github-actions");
+    expect(script).toContain("chmod 664");
+  });
+
+  test("bootstrap always provisions a write token", async () => {
+    // The container binds 0.0.0.0, and the server refuses to start without a
+    // token in that case. A bootstrap that skipped it would produce a restart
+    // loop rather than a running service.
+    const script = await read("scripts/bootstrap-x99.sh");
+    expect(script).toContain("X_SAGE_WRITE_TOKEN");
+    expect(script).toContain("openssl rand");
+  });
+
+  test("bootstrap refuses to run unprivileged", async () => {
+    const script = await read("scripts/bootstrap-x99.sh");
+    expect(script).toContain('id -u');
+    expect(script).toContain("must run as root");
+  });
+});
+
 describe("multi-arch build safety", () => {
   test("SPA is prebuilt on a native runner, not under QEMU", async () => {
     // esbuild segfaults deterministically when emulated. A multi-arch build that
