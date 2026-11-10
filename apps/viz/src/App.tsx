@@ -4,15 +4,16 @@ import ConceptGraph from "./ConceptGraph";
 import FilterControls from "./FilterControls";
 import DetailPanel from "./DetailPanel";
 import type { GraphNode, Layer, EdgeType } from "./types";
+import { EDGE_TYPES, LAYERS } from "./types";
 import "./styles.css";
 
 export default function App() {
   const { data, loading, error, reload } = useGraphData();
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [visibleLayers, setVisibleLayers] = useState<Set<Layer>>(new Set([0, 1]));
-  const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<Set<EdgeType>>(
-    new Set(["is-a", "part-of", "depends-on", "enables", "instantiates", "contradicts", "analogous-to"])
-  );
+  // Every layer starts visible. The KB grows at L2/L3, so a default of
+  // [0, 1] made newly added concepts look like they never reached the server.
+  const [visibleLayers, setVisibleLayers] = useState<Set<Layer>>(() => new Set(LAYERS));
+  const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<Set<EdgeType>>(() => new Set(EDGE_TYPES));
 
   const handleToggleLayer = useCallback((layer: Layer) => {
     setVisibleLayers((prev) => {
@@ -77,11 +78,15 @@ export default function App() {
 
   return (
     <div className="app-container">
-      <div className="app-title">x-sage 知识图谱</div>
+      <div className="app-title">
+        x-sage 知识图谱
+        {data.meta ? <span className="app-count">{data.meta.conceptCount} 概念</span> : null}
+      </div>
 
       <FilterControls
         visibleLayers={visibleLayers}
         visibleEdgeTypes={visibleEdgeTypes}
+        layerCounts={data.meta?.layerCounts}
         onToggleLayer={handleToggleLayer}
         onToggleEdgeType={handleToggleEdgeType}
       />

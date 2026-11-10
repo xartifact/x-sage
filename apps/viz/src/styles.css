@@ -633,3 +633,23 @@ html, body, #root {
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
+
+.app-count {
+  margin-left: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.filter-item-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.filter-item:hover .filter-item-count {
+  color: var(--text-secondary);
+}

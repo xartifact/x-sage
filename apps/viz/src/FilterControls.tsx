@@ -1,19 +1,18 @@
-import { LAYER_COLORS, LAYER_LABELS, EDGE_COLORS, EDGE_LABELS } from "./types";
+import { EDGE_COLORS, EDGE_LABELS, EDGE_TYPES, LAYER_COLORS, LAYER_LABELS, LAYERS } from "./types";
 import type { Layer, EdgeType } from "./types";
 
 interface FilterControlsProps {
   visibleLayers: Set<Layer>;
   visibleEdgeTypes: Set<EdgeType>;
+  layerCounts?: Record<string, number> | undefined;
   onToggleLayer: (layer: Layer) => void;
   onToggleEdgeType: (type: EdgeType) => void;
 }
 
-const LAYERS: Layer[] = [0, 1, 2, 3];
-const EDGE_TYPES: EdgeType[] = ["is-a", "part-of", "depends-on", "enables", "instantiates", "contradicts", "analogous-to"];
-
 export default function FilterControls({
   visibleLayers,
   visibleEdgeTypes,
+  layerCounts,
   onToggleLayer,
   onToggleEdgeType,
 }: FilterControlsProps) {
@@ -35,6 +34,11 @@ export default function FilterControls({
               style={{ backgroundColor: LAYER_COLORS[layer] }}
             />
             <span>{LAYER_LABELS[layer]}</span>
+            {/* The count is the whole point: a hidden layer that silently holds
+                most of the KB reads as "my new concepts never deployed". */}
+            {layerCounts ? (
+              <span className="filter-item-count">{layerCounts[`L${layer}`] ?? 0}</span>
+            ) : null}
           </label>
         ))}
       </div>

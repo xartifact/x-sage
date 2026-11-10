@@ -50,6 +50,9 @@ export interface GraphData {
   meta?: VizMeta;
 }
 
+/** Layer order used by filters, legends and counts. */
+export const LAYERS: Layer[] = [0, 1, 2, 3];
+
 export const LAYER_COLORS: Record<Layer, string> = {
   0: "#6366f1", // indigo — axioms
   1: "#3b82f6", // blue — core
@@ -83,6 +86,17 @@ export const EDGE_LABELS: Record<EdgeType, string> = {
   contradicts: "矛盾",
   "analogous-to": "类比",
 };
+
+/** Edge order used by filters, legends and counts. */
+export const EDGE_TYPES: EdgeType[] = [
+  "is-a",
+  "part-of",
+  "depends-on",
+  "enables",
+  "instantiates",
+  "contradicts",
+  "analogous-to",
+];
 
 export const NODE_RADIUS: Record<Layer, number> = {
   0: 24,
