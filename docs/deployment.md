@@ -109,4 +109,18 @@ docker exec x-sage bun -e "fetch('http://localhost:3000/api/health').then(r=>r.j
 | health 一直 `starting` | 端口不是容器内的 3000，或 `X_SAGE_KB` 指向不存在的路径 |
 | 版本显示 `dev`/`unknown` | build-args 与 Dockerfile ARG/ENV 名字不一致，或 compose 覆盖了它们 |
 | 部署后仍是旧版本 | compose 的 image 标签硬编码，`docker pull` 拉了但没被使用 |
+| 部署日志出现 `open /opt/xartifact/x-sage/.env: permission denied` | `.env` 是 `600 binzhan`，runner 用户 `github-actions` 读不到。必须是 `640` 且属组 `github-actions` |
 | 页面空白且 `/api/viz` 报错 | KB 未打进镜像：`COPY --from=builder /app/kb ./kb` 缺失 |
+
+### 概念数量对不上时
+
+先看服务端，再看前端。`/api/viz` 的 `meta` 给出真值：
+
+```bash
+curl -s https://x-sage.ts.xartifact.dev/api/viz | jq '.meta'
+# {"conceptCount":41,...,"layerCounts":{"L0":4,"L1":5,"L2":11,"L3":21}}
+```
+
+若 `conceptCount` 正确而页面只显示少量节点，问题在筛选：可视化默认按 `LAYERS`
+渲染全部层级，筛选面板每层都显示对应数量。历史上默认只勾选 L0/L1，导致新概念
+（几乎都落在 L2/L3）看起来从未上线。

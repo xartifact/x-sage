@@ -87,7 +87,11 @@ fi
 
 chown -R "$OWNER:$GROUP" "$DEPLOY_DIR"
 chmod 664 "$DEPLOY_DIR/docker-compose.yml"
-chmod 600 "$DEPLOY_DIR/.env"
+# 640, not 600: the deploy job runs as github-actions and `docker compose up`
+# reads .env before any container starts. With 600 owned by binzhan the runner
+# fails with "open .env: permission denied" and every deploy silently bails out
+# after pulling the image. Group read keeps the write token off other users.
+chmod 640 "$DEPLOY_DIR/.env"
 
 echo
 echo "==> done"

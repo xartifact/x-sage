@@ -192,6 +192,16 @@ describe("deployment bootstrap", () => {
     expect(script).toContain("chmod 664");
   });
 
+  test("bootstrap leaves .env readable by the deploy runner", async () => {
+    // `docker compose up` reads .env as github-actions before any container
+    // starts. A 600 binzhan-owned .env makes the deploy job pull the new image
+    // and then fail on `open .env: permission denied`, leaving the old
+    // container running and every concept invisible.
+    const script = await read("scripts/bootstrap-x99.sh");
+    expect(script).toContain("chmod 640");
+    expect(script).not.toContain("chmod 600");
+  });
+
   test("bootstrap does not embed its own compose copy", async () => {
     // An embedded copy drifts from the repo silently, and the drift is what
     // lost x99's volume: the host compose omitted `./data/kb:/app/kb`, so every
