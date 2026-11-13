@@ -92,11 +92,55 @@ export function formatFrontierMarkdown(entries: FrontierEntry[]): string {
   return lines.join("\n");
 }
 
+/** Row form of one entry, matching the table's column order. */
+function formatRow(entry: FrontierEntry): string {
+  return `| ${entry.concept} | ${entry.source} | ${entry.reason} | ${entry.priority} |`;
+}
+
 /**
- * Add a new entry to the frontier.
+ * Insert one row into the pending-concepts table, leaving every other byte alone.
+ *
+ * `writeFrontier` re-renders the whole file from the parsed table, which loses
+ * the "概念内张力" and "L2→L3 待展开方向" sections entirely — that is why the CLI
+ * refused to expose this operation at all. Inserting after the last row of the
+ * target table keeps the prose, the other tables and their ordering intact.
+ *
+ * A frontier file with no pending-concepts table is left untouched and reported:
+ * guessing where to create one would put the row in a section that means
+ * something else.
  */
 export async function addFrontierEntry(kbPath: string, entry: FrontierEntry): Promise<void> {
-  const existing = await readFrontier(kbPath);
-  existing.push(entry);
-  await writeFrontier(kbPath, existing);
+  const filePath = join(kbPath, "frontier.md");
+  let raw: string;
+  try {
+    raw = await readFile(filePath, "utf-8");
+  } catch {
+    throw new Error(`frontier.md not found in ${kbPath}`);
+  }
+
+  const lines = raw.split("\n");
+  const tableStart = lines.findIndex((line) => line.startsWith("| 概念"));
+  if (tableStart === -1) {
+    throw new Error("frontier.md has no 未决概念 table to insert into");
+  }
+
+  // Walk to the last row of this table; the first non-row line after the header
+  // ends it (a blank line, a heading, or another table).
+  let lastRow = tableStart;
+  for (let index = tableStart + 1; index < lines.length; index++) {
+    const line = lines[index]!;
+    if (line.startsWith("|")) {
+      lastRow = index;
+      continue;
+    }
+    break;
+  }
+
+  const row = formatRow(entry);
+  if (lines.slice(tableStart, lastRow + 1).some((line) => line === row)) {
+    return; // already present; adding it twice is not a second pending item
+  }
+
+  lines.splice(lastRow + 1, 0, row);
+  await writeFileAtomic(filePath, lines.join("\n"));
 }

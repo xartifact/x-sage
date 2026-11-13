@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { resolve, join } from "node:path";
-import { mkdtemp, cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createApp } from "../../server/src/app.ts";
 
@@ -162,10 +162,40 @@ describe("error handling", () => {
     expect(stderr).toContain("Must be one of:");
   });
 
-  test("frontier add is refused because it would delete prose sections", async () => {
-    const { stderr, exitCode } = await againstServer(["frontier", "add", "x", "y", "z"]);
+  test("frontier add appends one row and leaves the other sections alone", async () => {
+    const kbRoot = await copyKb();
+    try {
+      const before = await readFile(join(kbRoot, "frontier.md"), "utf-8");
+      const added = await againstServer(
+        ["frontier", "add", "x-core", "--source", "矩阵规划", "--reason", "建仓后核验实际形态", "--priority", "medium"],
+        { kbRoot },
+      );
+      expect(added.exitCode).toBe(0);
+
+      const after = await readFile(join(kbRoot, "frontier.md"), "utf-8");
+      // The two prose tables are the reason this command was disabled: a
+      // whole-file re-render dropped them.
+      expect(after).toContain("## 概念内张力");
+      expect(after).toContain("## L2→L3 待展开方向");
+      expect(after).toContain("| x-core | 矩阵规划 | 建仓后核验实际形态 | medium |");
+      expect(after.length).toBeGreaterThan(before.length);
+
+      // Adding the same row twice is not a second pending item.
+      const again = await againstServer(
+        ["frontier", "add", "x-core", "--source", "矩阵规划", "--reason", "建仓后核验实际形态", "--priority", "medium"],
+        { kbRoot },
+      );
+      expect(again.exitCode).toBe(0);
+      expect((await readFile(join(kbRoot, "frontier.md"), "utf-8")).match(/\| x-core \|/g)).toHaveLength(1);
+    } finally {
+      await rm(kbRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("frontier add without source or reason is a usage error", async () => {
+    const { stderr, exitCode } = await againstServer(["frontier", "add", "x-core"]);
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("disabled");
+    expect(stderr).toContain("Usage: x-sage frontier add");
   });
 
   test("viz export requires an explicit path", async () => {

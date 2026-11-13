@@ -10,6 +10,7 @@ import {
   refineAtom,
 } from "./index.ts";
 import { conceptRevision, splitConceptDocument } from "../manifest/body.ts";
+import { addFrontierEntry } from "../frontier/update.ts";
 import { formatConceptFile, parseConceptFile } from "../manifest/parse.ts";
 
 /**
@@ -245,6 +246,65 @@ describe("merge safety", () => {
         "---\nstatus: pending\n---\n## 新边提案\n\n- **from**: ghost\n- **type**: is-a\n- **target**: agent\n- **confidence**: confirmed\n",
       );
       await expect(mergeEdgeProposal(root, "ghost.md")).rejects.toThrow(/Concept not found: ghost/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+describe("frontier insertion", () => {
+  test("adds one row without touching the other tables", async () => {
+    const root = await mkdtemp(join(tmpdir(), "x-sage-frontier-"));
+    try {
+      await writeFile(
+        join(root, "frontier.md"),
+        [
+          "# 激活边界 frontier.md",
+          "",
+          "## 未决概念",
+          "",
+          "| 概念 | 来源 | 未解问题 | 优先级 |",
+          "|------|------|----------|--------|",
+          "| A | 来源A | 问题A | 高 |",
+          "",
+          "## 概念内张力",
+          "",
+          "| 张力 | 涉及概念 | 状态 | 说明 |",
+          "|------|---------|------|------|",
+          "| 甲 | a | 开放 | 说明甲 |",
+          "",
+          "## L2→L3 待展开方向",
+          "",
+          "| L3 候选方向 | 父概念 | 说明 |",
+          "|------------|--------|------|",
+          "| 乙 | b | 说明乙 |",
+          "",
+        ].join("\n"),
+      );
+
+      await addFrontierEntry(root, { concept: "B", source: "来源B", reason: "问题B", priority: "medium" });
+
+      const after = await readFile(join(root, "frontier.md"), "utf-8");
+      // The old implementation re-rendered the file from the parsed first table
+      // and silently deleted both prose tables below it.
+      expect(after).toContain("## 概念内张力");
+      expect(after).toContain("| 甲 | a | 开放 | 说明甲 |");
+      expect(after).toContain("## L2→L3 待展开方向");
+      expect(after).toContain("| 乙 | b | 说明乙 |");
+      // Inserted after the last row of the pending table, not at the end.
+      expect(after.indexOf("| B | 来源B | 问题B | medium |")).toBeLessThan(after.indexOf("## 概念内张力"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a file without the pending table is reported instead of guessed at", async () => {
+    const root = await mkdtemp(join(tmpdir(), "x-sage-frontier-"));
+    try {
+      await writeFile(join(root, "frontier.md"), "# 只有散文\n\n没有表格。\n");
+      await expect(
+        addFrontierEntry(root, { concept: "B", source: "s", reason: "r", priority: "low" }),
+      ).rejects.toThrow(/no 未决概念 table/);
+      expect(await readFile(join(root, "frontier.md"), "utf-8")).toBe("# 只有散文\n\n没有表格。\n");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

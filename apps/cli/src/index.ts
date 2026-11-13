@@ -161,10 +161,20 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
     case "frontier": {
       const subcmd = positional[0];
       if (subcmd === "add") {
-        emitJsonError(
-          "frontier add is disabled: it rewrites frontier.md from one table and deletes the other sections.\n" +
-            "Edit kb/<id>/frontier.md directly instead.",
-        );
+        const usage =
+          'Usage: x-sage frontier add <concept> --source "where this came from" --reason "what is unresolved" [--priority high|medium|low]';
+        const concept = requirePositional(positional[1], usage);
+        return {
+          method: "POST",
+          path: "/frontier",
+          query: { format: flags.json === "true" ? "json" : "text" },
+          body: {
+            concept,
+            source: requirePositional(flags.source, usage),
+            reason: requirePositional(flags.reason, usage),
+            ...(flags.priority === undefined ? {} : { priority: flags.priority }),
+          },
+        };
       }
       return {
         method: "GET",
@@ -394,7 +404,7 @@ Write-back (needs --token when the server requires one):
   refine-atom <concept-id> --atom "text" [--reason "text"]
   refine-body <id> --file <path|-> --expected-revision <rev> --reason "why"
   proposals list | proposals show <file> | proposals merge [file|all]
-  frontier list
+  frontier list | frontier add <concept> --source "..." --reason "..." [--priority P]
   checkpoint create <id> [session] | read <id> [session] | save -   (save reads stdin)
 
 Graph:

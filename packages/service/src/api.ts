@@ -20,6 +20,7 @@ import {
 import { proposalsDir, type KbContext } from "./kb.ts";
 import {
   activate,
+  appendFrontier,
   buildGraph,
   buildVizPayload,
   createCheckpoint,
@@ -365,6 +366,30 @@ async function route(
   if (path === "/frontier" && method === "GET") {
     const entries = await listFrontier(ctx);
     return format === "text" ? text(200, renderFrontier(entries)) : json(200, entries);
+  }
+
+  // Appending one pending concept is additive, so it is a POST on the list.
+  if (path === "/frontier" && method === "POST") {
+    const body = requireBody(request);
+    const priority = optionalField(body, "priority") ?? "medium";
+    // A priority the table cannot express would be written verbatim and read
+    // back as an invalid enum, so it is rejected before the row exists.
+    if (priority !== "high" && priority !== "medium" && priority !== "low") {
+      throw new ApiError(400, `Invalid priority: ${priority}. Must be high, medium or low`);
+    }
+
+    const entry = {
+      concept: requireField(body, "concept"),
+      source: requireField(body, "source"),
+      reason: requireField(body, "reason"),
+      priority: priority as "high" | "medium" | "low",
+    };
+    await appendFrontier(ctx, entry);
+
+    if (format === "text") {
+      return text(201, `Added frontier entry: ${entry.concept} (${entry.priority})\n`);
+    }
+    return json(201, entry);
   }
 
   // ---- one proposal, with its diff ----

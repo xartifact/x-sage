@@ -22,7 +22,16 @@ export { withKbLock, LockTimeoutError } from "./fs/lock.ts";
 export type { LockOptions } from "./fs/lock.ts";
 
 // Manifest module
-export { parseConceptFile, formatConceptFile } from "./manifest/index.ts";
+export {
+  parseConceptFile,
+  formatConceptFile,
+  splitConceptDocument,
+  joinConceptDocument,
+  conceptRevision,
+  normalizeBody,
+  isBlankBody,
+  MAX_BODY_CHARS,
+} from "./manifest/index.ts";
 export { generateManifest, formatManifest } from "./manifest/index.ts";
 
 // Graph module
