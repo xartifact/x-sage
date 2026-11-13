@@ -283,6 +283,28 @@ const x = "代码块";
     }
   });
 
+  test("the stored candidate is what a reviewer diffs and what a merge writes", async () => {
+    const root = await makeKb();
+    try {
+      const { revision } = await readConceptBody(root, "risk");
+      // Neither the file a reviewer writes nor a terminal paste ends with
+      // exactly one newline reliably. Normalising only at write time made the
+      // read-back differ from the submitted candidate by one byte.
+      const submitted = `${BODY.replace("原始正文", "改过的正文")}\n\n\n`;
+      const file = await proposeBody(join(root, "proposals"), {
+        conceptId: "risk", expectedRevision: revision, proposedBody: submitted, reason: "r",
+      });
+
+      const stored = JSON.parse(await readFile(join(root, "proposals", "bodies", file), "utf-8"));
+      expect(stored.proposedBody).toBe(`${submitted.trimEnd()}\n`);
+
+      await mergeBodyProposal(root, file);
+      expect((await readConceptBody(root, "risk")).body).toBe(stored.proposedBody);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("a proposal needs a reason", async () => {
     const root = await makeKb();
     try {

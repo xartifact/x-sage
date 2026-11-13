@@ -9,7 +9,6 @@ export {
   listBodyProposals,
   mergeBodyProposal,
   assertUsableBody,
-  applyBody,
   type BodyProposal,
   type BodyReadback,
 } from "./body.ts";

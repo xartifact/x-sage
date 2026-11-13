@@ -6,6 +6,7 @@ import {
   conceptRevision,
   isBlankBody,
   MAX_BODY_CHARS,
+  normalizeBody,
   splitConceptDocument,
 } from "../manifest/body.ts";
 import { parseConceptFile } from "../manifest/parse.ts";
@@ -107,20 +108,6 @@ export function assertUsableBody(body: string, prefix: string): void {
 }
 
 /**
- * Apply a candidate body by replacing only the bytes after the frontmatter.
- *
- * Returns the new file content. Metadata is copied through untouched — not
- * parsed and re-serialised — so an atom or edge update made by someone else in
- * the meantime cannot be reverted by this write.
- */
-export function applyBody(raw: string, proposedBody: string): string {
-  const { prefix } = splitConceptDocument(raw);
-  // Normalise exactly one trailing newline: files end with it, and a candidate
-  // pasted from a terminal often brings an extra blank line or none at all.
-  return prefix + `${proposedBody.replace(/\s+$/, "")}\n`;
-}
-
-/**
  * Persist a body proposal.
  *
  * The candidate is stored as JSON under `proposals/bodies/` with the revision it
@@ -154,7 +141,7 @@ export async function proposeBody(
     );
   }
 
-  const candidate = params.proposedBody.replace(/\s+$/, "") + "\n";
+  const candidate = normalizeBody(params.proposedBody);
   const raw = await readFile((await resolveConceptPath(kbPathOf(proposalsDir), params.conceptId))!, "utf-8");
   assertUsableBody(candidate, splitConceptDocument(raw).prefix);
 
@@ -168,7 +155,9 @@ export async function proposeBody(
     file: filename,
     conceptId: params.conceptId,
     expectedRevision: params.expectedRevision,
-    proposedBody: params.proposedBody,
+    // Stored normalised: a merge applies exactly these bytes, and a read-back
+    // then matches the candidate the reviewer was shown.
+    proposedBody: candidate,
     reason: params.reason,
     date: stamp,
     status: "pending",
@@ -243,9 +232,9 @@ export async function mergeBodyProposal(kbPath: string, filename: string): Promi
   const raw = await readFile(conceptPath, "utf-8");
   const { prefix, body } = splitConceptDocument(raw);
   const frontmatter = ConceptFrontmatterSchema.parse(matter(prefix).data);
-  const candidate = proposal.proposedBody.replace(/\s+$/, "") + "\n";
+  const candidate = normalizeBody(proposal.proposedBody);
 
-  if (body.replace(/\s+$/, "") + "\n" === candidate) {
+  if (normalizeBody(body) === candidate) {
     await writeFileAtomic(
       proposalPath,
       `${JSON.stringify({ ...proposal, status: "approved" }, null, 2)}\n`,

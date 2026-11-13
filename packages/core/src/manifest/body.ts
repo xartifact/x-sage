@@ -87,3 +87,17 @@ export const MAX_BODY_CHARS = 128 * 1024;
 export function isBlankBody(body: string): boolean {
   return body.trim() === "";
 }
+
+/**
+ * Normalise a candidate body to exactly one trailing newline.
+ *
+ * Every concept file ends with one, and a candidate pasted from a terminal
+ * brings either none or a handful of blank lines. Applying the normalisation at
+ * one place keeps three things in agreement: what a proposal stores, what a
+ * merge writes, and what `concept body` reads back. Doing it only at write time
+ * made the read-back differ from the submitted file by exactly one byte, which
+ * reads as "the server changed my text".
+ */
+export function normalizeBody(body: string): string {
+  return `${body.replace(/\s+$/, "")}\n`;
+}
