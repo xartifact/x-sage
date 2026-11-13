@@ -45,6 +45,7 @@ AI 可执行的标准写回操作：
 |------|---------|---------|
 | `propose-edge` | 发现两个概念间存在未记录的关联 | 新边定义 + 理由 |
 | `refine-atom` | 当前 atom 描述不足以区分相似概念 | 新 atom 候选 + 对比说明 |
+| `refine-body` | 正文结论已被推翻，需整段改写 | 候选正文 + revision 基线 + 理由 |
 | `flag-tension` | 发现两个概念存在未记录的矛盾 | 写入 frontier.md |
 | `create-checkpoint` | 会话结束时固化本次推理进度 | checkpoint 文件 |
 
@@ -138,7 +139,8 @@ x-sage/
 │
 └── proposals/               # AI 写回暂存区（待人类 review）
     ├── edges/               # propose-edge 输出
-    └── atoms/               # refine-atom 输出
+    ├── atoms/               # refine-atom 输出
+    └── bodies/              # refine-body 输出（JSON，带 expectedRevision）
 ```
 
 ---
