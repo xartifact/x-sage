@@ -22,11 +22,19 @@ export {
   listProposals,
   submitEdgeProposal,
   submitAtomProposal,
+  submitBodyProposal,
+  readBody,
   mergeProposals,
   renderManifest,
   writeManifest,
 } from "./write.ts";
-export type { ProposalLists, ProposeEdgeInput, ProposeAtomInput, MergeOutcome } from "./write.ts";
+export type {
+  ProposalLists,
+  ProposeEdgeInput,
+  ProposeAtomInput,
+  ProposeBodyInput,
+  MergeOutcome,
+} from "./write.ts";
 
 export { validateConcepts } from "./validate.ts";
 export type { ConceptValidationReport } from "./validate.ts";

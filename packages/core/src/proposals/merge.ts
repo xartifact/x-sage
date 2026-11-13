@@ -1,45 +1,39 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import matter from "gray-matter";
-import { parseConceptFile, formatConceptFile } from "../manifest/parse.ts";
+import { formatConceptFile, parseConceptFile } from "../manifest/parse.ts";
 import { EdgeSchema } from "../types/index.ts";
 import { writeFileAtomic } from "../fs/atomic.ts";
+import { assertProposalFilename, resolveConceptPath } from "./paths.ts";
+import { AlreadyMergedError, ProposalConflictError } from "./errors.ts";
 
-async function findConceptFile(kbPath: string, conceptId: string): Promise<string> {
-  const layers = ["L0-axioms", "L1-core", "L2-support", "L3-instances"];
-  for (const layer of layers) {
-    const filePath = join(kbPath, "concepts", layer, `${conceptId}.md`);
-    try {
-      await readFile(filePath, "utf-8");
-      return filePath;
-    } catch {
-      // File doesn't exist in this layer, continue scanning
-    }
-  }
-  throw new Error(`Concept file not found: ${conceptId}`);
-}
-
-/** Raised when a proposal was already merged; callers treat it as success. */
-export class AlreadyMergedError extends Error {
-  constructor(proposalFile: string) {
-    super(`Proposal already merged: ${proposalFile}`);
+/** A proposal that is not `pending` must not be applied. */
+function assertPending(file: string, status: unknown): void {
+  if (status === "approved") throw new AlreadyMergedError(file);
+  if (status !== "pending") {
+    throw new Error(`Proposal ${file} has status ${JSON.stringify(status)}, expected "pending"`);
   }
 }
 
-export async function mergeEdgeProposal(
-  kbPath: string,
-  proposalFile: string
-): Promise<void> {
-  const proposalPath = join(kbPath, "proposals", "edges", proposalFile);
+async function loadConcept(kbPath: string, conceptId: string): Promise<{
+  filePath: string;
+  raw: string;
+}> {
+  const filePath = await resolveConceptPath(kbPath, conceptId);
+  if (filePath === null) throw new Error(`Concept not found: ${conceptId}`);
+  return { filePath, raw: await readFile(filePath, "utf-8") };
+}
+
+export async function mergeEdgeProposal(kbPath: string, proposalFile: string): Promise<void> {
+  const file = assertProposalFilename(proposalFile);
+  const proposalPath = join(kbPath, "proposals", "edges", file);
   const raw = await readFile(proposalPath, "utf-8");
   const { data, content } = matter(raw);
 
   // Merging is not atomic across the two files it touches (concept + proposal).
   // If a crash lands between the writes, the retry sees `approved` and must not
   // append the edge a second time — that is how a duplicate edge used to appear.
-  if (data.status === "approved") {
-    throw new AlreadyMergedError(proposalFile);
-  }
+  assertPending(file, data.status);
 
   const fromMatch = content.match(/- \*\*from\*\*: (.+)/);
   const typeMatch = content.match(/- \*\*type\*\*: (.+)/);
@@ -57,17 +51,14 @@ export async function mergeEdgeProposal(
     const detail = parsed.error.issues
       .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
       .join("; ");
-    throw new Error(`Edge proposal ${proposalFile} is malformed: ${detail}`);
+    throw new Error(`Edge proposal ${file} is malformed: ${detail}`);
   }
 
   const from = fromMatch?.[1]?.trim() ?? "";
-  if (from === "") {
-    throw new Error(`Edge proposal ${proposalFile} has no "from" concept`);
-  }
+  if (from === "") throw new Error(`Edge proposal ${file} has no "from" concept`);
 
-  const conceptFilePath = await findConceptFile(kbPath, from);
-  const conceptRaw = await readFile(conceptFilePath, "utf-8");
-  const concept = parseConceptFile(conceptRaw, conceptFilePath);
+  const { filePath, raw: conceptRaw } = await loadConcept(kbPath, from);
+  const concept = parseConceptFile(conceptRaw, filePath);
 
   // An edge asserted twice is a duplicate, not a second relationship. Checking
   // here also makes a re-run after a partial failure harmless.
@@ -76,37 +67,57 @@ export async function mergeEdgeProposal(
   );
   if (!exists) {
     concept.frontmatter.edges.push(parsed.data);
-    await writeFileAtomic(conceptFilePath, formatConceptFile(concept));
+    await writeFileAtomic(filePath, formatConceptFile(concept));
   }
 
-  const approved = matter.stringify(content, { ...data, status: "approved" });
-  await writeFileAtomic(proposalPath, approved);
+  await writeFileAtomic(proposalPath, matter.stringify(content, { ...data, status: "approved" }));
 }
 
-export async function mergeAtomProposal(
-  kbPath: string,
-  proposalFile: string
-): Promise<void> {
-  const proposalPath = join(kbPath, "proposals", "atoms", proposalFile);
+/** The atom text between two headings of an atom proposal. */
+function proposalAtom(content: string): string {
+  const match = content.match(/## 建议新 atom\s*\n([\s\S]*?)(?=\n## |$)/);
+  return match?.[1]?.trim() ?? "";
+}
+
+/** The atom the proposal was written against, used as its baseline. */
+function proposalBaselineAtom(content: string): string {
+  const match = content.match(/## 当前 atom\s*\n([\s\S]*?)(?=\n## |$)/);
+  return match?.[1]?.trim() ?? "";
+}
+
+export async function mergeAtomProposal(kbPath: string, proposalFile: string): Promise<void> {
+  const file = assertProposalFilename(proposalFile);
+  const proposalPath = join(kbPath, "proposals", "atoms", file);
   const raw = await readFile(proposalPath, "utf-8");
   const { data, content } = matter(raw);
 
-  if (data.status === "approved") {
-    throw new AlreadyMergedError(proposalFile);
-  }
+  assertPending(file, data.status);
 
   const conceptId = typeof data.concept === "string" ? data.concept : "";
+  if (conceptId === "") throw new Error(`Atom proposal ${file} has no "concept"`);
 
-  const proposedAtomMatch = content.match(/## 建议新 atom\s*\n(.+?)(?=\n## |$)/s);
-  const proposedAtom = proposedAtomMatch && proposedAtomMatch.length > 1 ? proposedAtomMatch[1]!.trim() : "";
+  const proposedAtom = proposalAtom(content);
+  if (proposedAtom === "") throw new Error(`Atom proposal ${file} has no proposed atom`);
+  if (proposedAtom.length > 200) {
+    throw new Error(`Atom proposal ${file} proposes ${proposedAtom.length} characters, limit is 200`);
+  }
 
-  const conceptFilePath = await findConceptFile(kbPath, conceptId);
-  const conceptRaw = await readFile(conceptFilePath, "utf-8");
-  const concept = parseConceptFile(conceptRaw, conceptFilePath);
+  const { filePath, raw: conceptRaw } = await loadConcept(kbPath, conceptId);
+  const concept = parseConceptFile(conceptRaw, filePath);
+
+  // The baseline is the atom the proposal quotes. If the live concept has moved
+  // on, applying this proposal would silently discard whatever changed the atom
+  // in between — the exact lost update the revision scheme exists to prevent.
+  const baseline = proposalBaselineAtom(content);
+  if (baseline !== "" && baseline !== concept.frontmatter.atom) {
+    throw new ProposalConflictError(
+      `Atom proposal ${file} was written against a different atom for ${conceptId}`,
+      file,
+    );
+  }
 
   concept.frontmatter.atom = proposedAtom;
-  await writeFileAtomic(conceptFilePath, formatConceptFile(concept));
+  await writeFileAtomic(filePath, formatConceptFile(concept));
 
-  const approved = matter.stringify(content, { ...data, status: "approved" });
-  await writeFileAtomic(proposalPath, approved);
+  await writeFileAtomic(proposalPath, matter.stringify(content, { ...data, status: "approved" }));
 }

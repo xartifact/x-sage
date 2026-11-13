@@ -84,6 +84,13 @@ interface Invocation {
    * the exit code; sending the report to stderr would hide it from a pipe.
    */
   reportToStdout?: boolean;
+  /**
+   * Local path (or `-` for stdin) whose contents become `body.proposedBody`.
+   *
+   * The body is the user's own material, not KB data, so reading it locally
+   * does not make this a local mode: nothing about the KB is inspected.
+   */
+  readBodyFrom?: string;
 }
 
 /**
@@ -269,8 +276,58 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
       };
     }
 
+    case "refine-body": {
+      const conceptId = requirePositional(
+        positional[0],
+        'Usage: x-sage refine-body <concept-id> --file <path|-> --expected-revision <rev> --reason "why"',
+      );
+      const source = requirePositional(
+        flags.file,
+        'Usage: x-sage refine-body <concept-id> --file <path|-> --expected-revision <rev> --reason "why"',
+      );
+      const expectedRevision = requirePositional(
+        flags["expected-revision"],
+        'Usage: x-sage refine-body <concept-id> --file <path|-> --expected-revision <rev> --reason "why"',
+      );
+      const reason = requirePositional(
+        flags.reason,
+        'Usage: x-sage refine-body <concept-id> --file <path|-> --expected-revision <rev> --reason "why"',
+      );
+      return {
+        method: "POST",
+        path: "/proposals",
+        query: { format: flags.json === "true" ? "json" : "text" },
+        body: { kind: "body", conceptId, expectedRevision, reason, proposedBody: "" },
+        // Filled in by main() before the request: the body is a local file.
+        readBodyFrom: source,
+      };
+    }
+
+    case "concept": {
+      const subcmd = positional[0];
+      if (subcmd === "body") {
+        const conceptId = requirePositional(
+          positional[1],
+          "Usage: x-sage concept body <concept-id> [--format json|markdown] [--json]",
+        );
+        q.format =
+          flags.json === "true" ? "json" : flags.format === "markdown" || flags.format === "human" ? "markdown" : "json";
+        return { method: "GET", path: `/concepts/${encodeURIComponent(conceptId)}/body`, query: q };
+      }
+      emitJsonError("Usage: x-sage concept body <concept-id> [--format json|markdown]");
+    }
+
     case "proposals": {
       const subcmd = positional[0];
+      if (subcmd === "show") {
+        const file = requirePositional(positional[1], "Usage: x-sage proposals show <proposal-file> [--format diff|json]");
+        return {
+          method: "GET",
+          path: `/proposals/${encodeURIComponent(file)}`,
+          query: { format: flags.json === "true" ? "json" : "text" },
+          reportToStdout: true,
+        };
+      }
       if (subcmd === "merge") {
         return {
           method: "POST",
@@ -332,9 +389,11 @@ Validate:
   validate [--graph] [--json]           Files; --graph adds integrity + staleness
 
 Write-back (needs --token when the server requires one):
+  concept body <id> [--format json|markdown]   Read the body + revision
   propose-edge <from> <type> <target> [--confidence C]
   refine-atom <concept-id> --atom "text" [--reason "text"]
-  proposals list | proposals merge [file|all]
+  refine-body <id> --file <path|-> --expected-revision <rev> --reason "why"
+  proposals list | proposals show <file> | proposals merge [file|all]
   frontier list
   checkpoint create <id> [session] | read <id> [session] | save -   (save reads stdin)
 
@@ -421,6 +480,18 @@ async function main(): Promise<void> {
   }
 
   const invocation = invoke(command, allArgs.slice(1), stdinCheckpoint);
+
+  if (invocation.readBodyFrom !== undefined) {
+    const source = invocation.readBodyFrom;
+    const text =
+      source === "-"
+        ? await new Response(Bun.stdin.stream()).text()
+        : await Bun.file(source).text().catch((err: unknown) => {
+            emitJsonError(`cannot read --file ${source}: ${err instanceof Error ? err.message : String(err)}`);
+          });
+    if (text.trim() === "") emitJsonError(`--file ${source} is empty: a body proposal needs content`);
+    invocation.body = { ...(invocation.body as Record<string, unknown>), proposedBody: text };
+  }
 
   // Acceptance mirrors the requested format so a proxy or the dispatcher itself
   // can negotiate on content type without the CLI having to know the mapping.

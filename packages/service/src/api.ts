@@ -8,7 +8,16 @@ import {
 import { completeSymmetricEdges } from "@x-sage/core";
 import { formatManifest } from "@x-sage/core/manifest";
 import { CheckpointSchema } from "@x-sage/core";
-import type { KbContext } from "./kb.ts";
+import {
+  ProposalConflictError,
+  ProposalTargetNotFoundError,
+  diffBodies,
+  formatUnifiedDiff,
+  readBodyProposal,
+  listBodyProposals,
+  type BodyProposal,
+} from "@x-sage/core/proposals";
+import { proposalsDir, type KbContext } from "./kb.ts";
 import {
   activate,
   buildGraph,
@@ -25,7 +34,9 @@ import {
   saveCheckpoint,
   search,
   semanticGraph,
+  readBody,
   submitAtomProposal,
+  submitBodyProposal,
   submitEdgeProposal,
   validateConcepts,
   writeGraph,
@@ -184,12 +195,20 @@ export async function handleRequest(
   try {
     return await route(ctx, method, path, query, request, format);
   } catch (err) {
+    // Status is chosen from the error type first. The old fallback matched on
+    // the word "not found" in the message, which meant a conflict or a bad
+    // request had to be phrased to look like a 404 to get one — and a typo'd
+    // merge target silently reported success.
     const status =
       err instanceof ApiError
         ? err.status
-        : (err instanceof Error ? err.message : String(err)).includes("not found")
+        : err instanceof ProposalTargetNotFoundError
           ? 404
-          : 400;
+          : err instanceof ProposalConflictError
+            ? 409
+            : (err instanceof Error ? err.message : String(err)).includes("not found")
+              ? 404
+              : 400;
     const message =
       err instanceof ApiError
         ? err.message
@@ -311,6 +330,23 @@ async function route(
     return json(status, report);
   }
 
+  // ---- concept body (read + propose) ----
+  const bodyMatch = /^\/concepts\/([^/]+)\/body$/.exec(path);
+  if (bodyMatch !== null) {
+    const conceptId = decodeURIComponent(bodyMatch[1]!);
+    if (method === "GET") {
+      const result = await readBody(ctx, conceptId);
+      // `--format markdown` is the body alone: a reviewer diffing a candidate
+      // against the live file wants prose, not a frontmatter block they were
+      // told not to touch.
+      if (format === "markdown" || format === "text") {
+        return text(200, result.body, MARKDOWN_TYPE);
+      }
+      return json(200, result);
+    }
+    throw new ApiError(405, "Method Not Allowed: use GET /concepts/:id/body");
+  }
+
   // ---- per-concept routes ----
   const conceptMatch = /^\/concepts\/([^/]+)(\/edges)?$/.exec(path);
   if (conceptMatch !== null) {
@@ -331,6 +367,13 @@ async function route(
     return format === "text" ? text(200, renderFrontier(entries)) : json(200, entries);
   }
 
+  // ---- one proposal, with its diff ----
+  const proposalMatch = /^\/proposals\/([^/]+)$/.exec(path);
+  if (proposalMatch !== null && method === "GET") {
+    const file = decodeURIComponent(proposalMatch[1]!);
+    return proposalDetail(ctx, file, format);
+  }
+
   // ---- proposals ----
   if (path === "/proposals" && method === "GET") {
     const lists = await listProposals(ctx);
@@ -340,7 +383,14 @@ async function route(
   if (path === "/proposals/merge" && method === "POST") {
     const body = request.body === undefined ? {} : requireBody(request);
     const outcome = await mergeProposals(ctx, optionalField(body, "file") ?? "all");
-    return format === "text" ? text(200, renderMergeOutcome(outcome)) : json(200, outcome);
+    const rendered = renderMergeOutcome(outcome);
+
+    // A merge that reports a failure must not answer 200: the CLI derives its
+    // exit code from the status, so 200 made `proposals merge` print `✗ Failed`
+    // and exit 0, and a pipeline could not tell it apart from success.
+    // Conflicts are 409 (re-read, resubmit); malformed proposals are 422.
+    const status = outcome.conflicts.length > 0 ? 409 : outcome.failed.length > 0 ? 422 : 200;
+    return format === "text" ? text(status, rendered) : json(status, outcome);
   }
 
   // One collection, two kinds. The kind travels in the body as `kind`, so the
@@ -355,7 +405,10 @@ async function route(
     if (kind === "atom") {
       return proposeAtom(ctx, body, format);
     }
-    throw new ApiError(400, `Unknown proposal kind: ${kind}. Must be edge or atom`);
+    if (kind === "body") {
+      return proposeBodyEdit(ctx, body, format);
+    }
+    throw new ApiError(400, `Unknown proposal kind: ${kind}. Must be edge, atom or body`);
   }
 
   // ---- checkpoints ----
@@ -536,6 +589,93 @@ async function proposeAtom(
     return text(201, `Proposed atom update for: ${conceptId}\nWritten to: proposals/atoms/${filename}\n`);
   }
   return json(201, { file: filename });
+}
+
+/**
+ * Submit a body proposal.
+ *
+ * The revision is required rather than derived server-side: a proposal is only
+ * meaningful relative to the version its author read, and silently rebasing it
+ * would apply a body written against different text.
+ */
+async function proposeBodyEdit(
+  ctx: KbContext,
+  body: Record<string, unknown>,
+  format: Format,
+): Promise<ApiResponse> {
+  const conceptId = requireField(body, "conceptId");
+  const expectedRevision = requireField(body, "expectedRevision");
+  const proposedBody = requireField(body, "proposedBody");
+  const reason = requireField(body, "reason");
+
+  const filename = await submitBodyProposal(ctx, {
+    conceptId,
+    expectedRevision,
+    proposedBody,
+    reason,
+  });
+
+  if (format === "text") {
+    return text(201, `Proposed body update for: ${conceptId}\nWritten to: proposals/bodies/${filename}\n`);
+  }
+  return json(201, { file: filename, conceptId, expectedRevision });
+}
+
+/**
+ * One proposal plus its diff.
+ *
+ * Body proposals diff against the live concept body; edge and atom proposals
+ * have no two-sided text, so they return their fields and an empty diff. The
+ * diff is computed per request instead of stored: the concept may have moved
+ * since the proposal was written, and a stale diff would review text that no
+ * longer exists.
+ */
+async function proposalDetail(
+  ctx: KbContext,
+  file: string,
+  format: Format,
+): Promise<ApiResponse> {
+  let proposal: BodyProposal;
+  try {
+    proposal = await readBodyProposal(proposalsDir(ctx), file);
+  } catch {
+    // Not a body proposal: report it through the existing list so a caller can
+    // tell "wrong kind" from "no such file".
+    const lists = await listProposals(ctx);
+    const known = [...lists.edges, ...lists.atoms].find((candidate) => candidate.file === file);
+    if (known === undefined) throw new ProposalTargetNotFoundError(file);
+    return format === "text"
+      ? text(200, `Proposal ${file} has no body diff.\n`)
+      : json(200, { file, kind: "atom" in known ? "atom" : "edge", proposal: known });
+  }
+
+  const live = await readBody(ctx, proposal.conceptId);
+  const hunks = diffBodies(live.body, proposal.proposedBody);
+  const diff = formatUnifiedDiff(hunks, `${proposal.conceptId} (current)`, `${proposal.conceptId} (proposed)`);
+
+  if (format === "text") {
+    return text(
+      200,
+      [
+        `Proposal: ${file}`,
+        `Concept:  ${proposal.conceptId}`,
+        `Reason:   ${proposal.reason}`,
+        `Status:   ${proposal.status}`,
+        `Revision: ${proposal.expectedRevision.slice(0, 12)} (current ${live.revision.slice(0, 12)})`,
+        "",
+        diff,
+      ].join("\n"),
+    );
+  }
+  return json(200, {
+    file,
+    kind: "body",
+    proposal,
+    currentRevision: live.revision,
+    applies: proposal.expectedRevision === live.revision,
+    diff,
+    hunks,
+  });
 }
 
 /** Re-exported so the server can render a graph-only report without a KB. */

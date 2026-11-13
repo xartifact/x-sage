@@ -35,11 +35,28 @@ interface Run {
  */
 const SANDBOX_CONFIG = join(tmpdir(), `x-sage-cli-cfg-${process.pid}`);
 
-async function run(args: string[], env: Record<string, string> = {}): Promise<Run> {
+/**
+ * A private KB copy for tests that mutate.
+ *
+ * Merges and proposals write to disk; pointing them at `REAL_KB` would edit the
+ * repository and make the suite order-dependent.
+ */
+async function copyKb(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "x-sage-cli-kb-"));
+  await cp(REAL_KB, dir, { recursive: true });
+  return dir;
+}
+
+async function run(
+  args: string[],
+  env: Record<string, string> = {},
+  stdin?: string,
+): Promise<Run> {
   const proc = Bun.spawn(["bun", CLI, ...args], {
     cwd: process.cwd(),
     stdout: "pipe",
     stderr: "pipe",
+    ...(stdin === undefined ? {} : { stdin: new TextEncoder().encode(stdin) }),
     env: {
       ...process.env,
       X_SAGE_SERVER: "",
@@ -62,8 +79,8 @@ async function run(args: string[], env: Record<string, string> = {}): Promise<Ru
  * Remote-mode assertions must go over the wire: the point is that no kb data
  * reaches the client.
  */
-function serve(writeToken?: string) {
-  const app = createApp({ kbRoot: REAL_KB, ...(writeToken === undefined ? {} : { writeToken }) });
+function serve(writeToken?: string, kbRoot: string = REAL_KB) {
+  const app = createApp({ kbRoot, ...(writeToken === undefined ? {} : { writeToken }) });
   const server = Bun.serve({ port: 0, fetch: (request) => app.fetch(request) });
   return {
     url: `http://127.0.0.1:${server.port}`,
@@ -80,12 +97,12 @@ function serve(writeToken?: string) {
  */
 async function againstServer(
   args: string[],
-  options: { writeToken?: string } = {},
+  options: { writeToken?: string; stdin?: string; kbRoot?: string } = {},
 ): Promise<Run> {
-  const server = serve(options.writeToken);
+  const server = serve(options.writeToken, options.kbRoot);
   try {
     const tokenArgs = options.writeToken === undefined ? [] : ["--token", options.writeToken];
-    return await run(["--server", server.url, ...tokenArgs, ...args]);
+    return await run(["--server", server.url, ...tokenArgs, ...args], {}, options.stdin);
   } finally {
     server.stop();
   }
@@ -301,13 +318,23 @@ describe("wire contract", () => {
       expect(denied.exitCode).toBe(1);
       expect(denied.stderr).toContain("Unauthorized");
 
+      // 401 without the token, 404 with it: the named proposal does not exist.
+      // A typo'd or missing filename must not read as "nothing to merge".
       const allowed = await run([
         "--server", server.url,
         "--token", "s3cret",
         "proposals", "merge", "nope.md",
       ]);
-      expect(allowed.exitCode).toBe(0);
-      expect(allowed.stdout).toContain("No pending proposals to merge");
+      expect(allowed.exitCode).toBe(1);
+      expect(allowed.stderr).toContain("No such proposal");
+
+      const all = await run([
+        "--server", server.url,
+        "--token", "s3cret",
+        "proposals", "merge", "all",
+      ]);
+      expect(all.exitCode).toBe(0);
+      expect(all.stdout).toContain("No pending proposals to merge");
     } finally {
       server.stop();
     }
@@ -321,6 +348,103 @@ describe("wire contract", () => {
       expect(stdout).toContain("contradicts");
     } finally {
       server.stop();
+    }
+  });
+});
+
+describe("body write-back", () => {
+  test("concept body reports the revision the proposal must quote", async () => {
+    const { stdout, exitCode } = await againstServer(["concept", "body", "risk"]);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.conceptId).toBe("risk");
+    expect(parsed.revision).toMatch(/^[a-f0-9]{64}$/);
+    // The body is everything after the frontmatter, so it cannot carry `id:`.
+    expect(parsed.body).not.toContain("id: risk");
+  });
+
+  test("refine-body rejects a stale revision and accepts a current one", async () => {
+    const kbRoot = await copyKb();
+    try {
+      const live = JSON.parse((await againstServer(["concept", "body", "risk"], { kbRoot })).stdout);
+
+      const stale = await againstServer(
+        ["refine-body", "risk", "--file", "-", "--expected-revision", "0".repeat(64), "--reason", "r"],
+        { kbRoot, stdin: "# 风险\n\n候选。\n" },
+      );
+      expect(stale.exitCode).toBe(1);
+      expect(stale.stderr).toContain("revision");
+
+      const ok = await againstServer(
+        ["refine-body", "risk", "--file", "-", "--expected-revision", live.revision, "--reason", "按澄清更正"],
+        { kbRoot, stdin: "# 风险\n\n候选。\n" },
+      );
+      expect(ok.exitCode).toBe(0);
+      expect(ok.stdout).toContain("proposals/bodies/");
+    } finally {
+      await rm(kbRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("refine-body reads stdin with --file -", async () => {
+    const kbRoot = await copyKb();
+    try {
+      const live = JSON.parse((await againstServer(["concept", "body", "risk"], { kbRoot })).stdout);
+      const candidate = "# 风险\n\n来自 stdin 的正文。\n";
+      const { stdout, exitCode } = await againstServer(
+        ["refine-body", "risk", "--file", "-", "--expected-revision", live.revision, "--reason", "stdin"],
+        { kbRoot, stdin: candidate },
+      );
+      expect(exitCode).toBe(0);
+
+      const file = stdout.match(/proposals\/bodies\/(\S+\.json)/)?.[1];
+      expect(file).toBeDefined();
+      const shown = await againstServer(["proposals", "show", file!, "--json"], { kbRoot });
+      expect(JSON.parse(shown.stdout).proposal.proposedBody).toBe(candidate);
+    } finally {
+      await rm(kbRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("proposals show prints a diff, then merge applies it", async () => {
+    const kbRoot = await copyKb();
+    try {
+      const live = JSON.parse((await againstServer(["concept", "body", "risk"], { kbRoot })).stdout);
+      const candidate = `${live.body}\n追加的一段。\n`;
+      const created = await againstServer(
+        ["refine-body", "risk", "--file", "-", "--expected-revision", live.revision, "--reason", "r"],
+        { kbRoot, stdin: candidate },
+      );
+      const file = created.stdout.match(/proposals\/bodies\/(\S+\.json)/)?.[1];
+      expect(file).toBeDefined();
+
+      const shown = await againstServer(["proposals", "show", file!], { kbRoot });
+      expect(shown.exitCode).toBe(0);
+      expect(shown.stdout).toContain("+追加的一段。");
+
+      const merged = await againstServer(["proposals", "merge", file!], { kbRoot });
+      expect(merged.exitCode).toBe(0);
+      expect(merged.stdout).toContain("graph.json and MANIFEST.md are unchanged");
+
+      const after = await againstServer(["concept", "body", "risk", "--format", "markdown"], { kbRoot });
+      expect(after.stdout).toBe(candidate);
+    } finally {
+      await rm(kbRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("an empty --file is refused before any request", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "x-sage-body-"));
+    const file = join(dir, "empty.md");
+    await writeFile(file, "   \n");
+    try {
+      const { stderr, exitCode } = await againstServer([
+        "refine-body", "risk", "--file", file, "--expected-revision", "x", "--reason", "r",
+      ]);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("empty");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });

@@ -22,6 +22,19 @@ export const SourceSchema = z.enum([
   "synthesis",   // 对多个领域材料的综合再建构
 ]);
 
+/**
+ * A concept id that can be used as a filename.
+ *
+ * Ids address files (`concepts/<layer>/<id>.md`), so the character class is
+ * deliberately narrower than "any string": no `/`, no `.`, no leading dash, no
+ * `..`. Without this, an id from a request body becomes a path, and a merge
+ * writes outside the KB.
+ */
+export const ConceptIdSchema = z.string().regex(
+  /^[a-z0-9][a-z0-9-]*$/,
+  'Must be a lowercase slug: [a-z0-9-], starting with a letter or digit'
+);
+
 // target 格式：本 KB 内用 "concept-id"，跨 KB 用 "kb-id::concept-id"
 const ConceptRefSchema = z.string().regex(
   /^[a-z0-9-]+(::([a-z0-9-]+))?$/,

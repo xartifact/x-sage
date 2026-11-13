@@ -13,11 +13,17 @@ export function parseConceptFile(raw: string, filePath: string): ConceptFile {
 }
 
 /**
- * Format a ConceptFile back into markdown with frontmatter.
+ * Serialise frontmatter + body back into a concept file.
+ *
+ * Delegates the YAML to gray-matter instead of hand-building lines. The hand-
+ * rolled version quoted every string with `"` and never escaped it, so an atom
+ * containing a double quote produced a file that no longer parsed — the next
+ * `validate` reported the concept as broken and `/api/viz` failed outright.
+ * gray-matter picks the quoting style per value and escapes what it quotes.
  */
 export function formatConceptFile(concept: ConceptFile): string {
   const { frontmatter, molecule } = concept;
-  const fm: Record<string, unknown> = {
+  const data: Record<string, unknown> = {
     id: frontmatter.id,
     atom: frontmatter.atom,
     layer: frontmatter.layer,
@@ -26,26 +32,9 @@ export function formatConceptFile(concept: ConceptFile): string {
     source: frontmatter.source,
     triggers: frontmatter.triggers,
   };
-  if (frontmatter.edges.length > 0) fm.edges = frontmatter.edges;
+  if (frontmatter.edges.length > 0) data.edges = frontmatter.edges;
 
-  // YAML frontmatter stringification
-  const lines = ["---"];
-  for (const [key, value] of Object.entries(fm)) {
-    if (Array.isArray(value)) {
-      lines.push(`${key}:`);
-      for (const item of value) {
-        if (typeof item === "object" && item !== null) {
-          lines.push(`  - ${JSON.stringify(item)}`);
-        } else {
-          lines.push(`  - ${String(item)}`);
-        }
-      }
-    } else {
-      lines.push(`${key}: ${typeof value === "string" ? `"${value}"` : value}`);
-    }
-  }
-  lines.push("---");
-  lines.push("");
-  lines.push(molecule);
-  return lines.join("\n");
+  // `stringify` appends one newline after the body; concept files end with one,
+  // and the trailing blank line the empty body would otherwise leave is dropped.
+  return matter.stringify(`${molecule}\n`, data);
 }

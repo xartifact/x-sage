@@ -1,5 +1,7 @@
 # x-sage：面向大模型的概念知识库架构
 
+> 后续需求：[通过 CLI 维护概念完整正文](concept-body-update-requirement.md)（2026-11-13，需求提案，未实现）。补齐目前 atom/边写回与完整 molecule 纠偏之间的缺口。
+
 ## 设计背景
 
 传统数据库面向机器检索（SQL/向量），传统文档面向人类阅读。
@@ -317,19 +319,50 @@ x-sage --server https://x-sage.example.com activate decision
 | GET | `/api/search?q=` | 关键词检索 |
 | GET | `/api/concepts/:id?strategy=&depth=` | 激活：概念 + 邻域 |
 | GET | `/api/concepts/:id/edges?type=&dir=` | 边查询；`dir=in` 即「谁指向它」 |
+| GET | `/api/concepts/:id/body` | 正文（frontmatter 之后全部）+ `revision`；`format=markdown` 只返回正文 |
 | GET | `/api/path?from=&to=` | 最短路径 |
 | GET | `/api/validate?graph=true` | 校验；不通过返回 422 |
 | GET | `/api/frontier` | 未解张力 |
-| GET | `/api/proposals` | 待审提案（边 + atom） |
-| POST | `/api/proposals` | 新建提案；body 的 `kind` 为 `edge` 或 `atom` |
+| GET | `/api/proposals` | 待审提案（边 + atom + 正文） |
+| GET | `/api/proposals/:file` | 单个提案；正文提案附带与当前正文的 unified diff |
+| POST | `/api/proposals` | 新建提案；body 的 `kind` 为 `edge`、`atom` 或 `body` |
 | POST | `/api/proposals/merge` | 合并提案回概念文件（`/merge` 是业界惯例，保留） |
 | GET | `/api/checkpoints/:concept?session=` | 读快照（缺省取最新） |
 | POST | `/api/checkpoints/:concept` | 建空骨架（201） |
 | PUT | `/api/checkpoints/:concept` | 覆盖保存完整快照 |
 
 **为什么这样分**：重建 graph/MANIFEST 是幂等的（同样输入必得同样输出），所以用 `PUT`；
-创建提案每次产生新文件，所以用 `POST`；两种提案共用集合路径，类型放在 body 的 `kind`，
+创建提案每次产生新文件，所以用 `POST`；三种提案共用集合路径，类型放在 body 的 `kind`，
 避免用子路径编码动作。
+
+**正文与元数据分开的两个端点**：`/concepts/:id` 是激活（整图 + 语义闭包 + 邻域），
+`/concepts/:id/body` 只读一个文件。正文写回也不复用 atom 的整档重序列化——
+它按字节替换 frontmatter 之后的部分，元数据原样保留。
+
+**冲突用 409**：正文提案带 `expectedRevision`（提交与合并各校验一次），
+基线变化返回 409 且提案保持可审阅；合并失败（提案本身不合法）返回 422。
+
+### 正文写回流程
+
+正文是 frontmatter 之后的全部 Markdown（molecule、张力、激活建议）。它的写回走提案，
+但和 atom 提案有三点不同，都是为了让纠错可审阅、可重试、不误伤元数据：
+
+```bash
+x-sage concept body <id> --json                       # 取 body + revision
+x-sage refine-body <id> --file candidate.md \
+  --expected-revision <revision> --reason "为什么改"   # 提交提案
+x-sage proposals show <file>                          # unified diff
+x-sage proposals merge <file>                         # 应用
+x-sage concept body <id> --format markdown            # 读回
+```
+
+| 约束 | 实现 |
+|---|---|
+| 元数据不动 | 合并按字节替换 frontmatter 之后的部分，不解析后重序列化 |
+| 并发保护 | `revision = sha256(canonical frontmatter + body)`；提交与合并各校验一次 |
+| 冲突可恢复 | 409，提案保持 `pending`，重新读取后重提 |
+| 重试幂等 | 正文已写但状态未落盘时，磁盘正文等于候选正文即视为已应用 |
+| 派生文件 | 正文不参与 `graph.json` / `MANIFEST.md` 的生成，回执明确说明无需重建 |
 
 ### 写保护
 

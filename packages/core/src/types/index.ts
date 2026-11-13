@@ -1,4 +1,4 @@
-export { ConceptFrontmatterSchema, EdgeSchema, EdgeTypeSchema, ConfidenceSchema, SourceSchema } from "./concept.ts";
+export { ConceptFrontmatterSchema, EdgeSchema, EdgeTypeSchema, ConfidenceSchema, SourceSchema, ConceptIdSchema } from "./concept.ts";
 export type { ConceptFrontmatter, Edge, EdgeType, Confidence, Source, ConceptFile } from "./concept.ts";
 
 export { GraphSchema, GraphNodeSchema, GraphEdgeSchema } from "./graph.ts";

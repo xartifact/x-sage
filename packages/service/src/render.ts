@@ -278,7 +278,18 @@ export function renderProposals(lists: ProposalLists): string {
     }
   }
 
-  if (lists.edges.length === 0 && lists.atoms.length === 0) {
+  if (lists.bodies.length > 0) {
+    lines.push("Body proposals:");
+    for (const proposal of lists.bodies) {
+      // Length, not content: a body is the whole document and echoing it here
+      // would bury the list it belongs to. `body show` prints the candidate.
+      lines.push(
+        `  ${proposal.status.padEnd(8)} ${proposal.conceptId}: ${proposal.proposedBody.length} chars, ${proposal.reason || "(no reason)"}  [${proposal.file}]`,
+      );
+    }
+  }
+
+  if (lists.edges.length === 0 && lists.atoms.length === 0 && lists.bodies.length === 0) {
     lines.push("No proposals found.");
   }
 
@@ -289,15 +300,28 @@ export function renderProposals(lists: ProposalLists): string {
 export function renderMergeOutcome(outcome: MergeOutcome): string {
   const lines: string[] = [];
   for (const file of outcome.merged) lines.push(`✓ Merged: ${file}`);
+  for (const conflict of outcome.conflicts) lines.push(`! Conflict ${conflict.file}: ${conflict.error}`);
   for (const failure of outcome.failed) lines.push(`✗ Failed ${failure.file}: ${failure.error}`);
 
-  if (outcome.merged.length === 0 && outcome.failed.length === 0) {
+  if (outcome.merged.length === 0 && outcome.failed.length === 0 && outcome.conflicts.length === 0) {
     lines.push("No pending proposals to merge.");
     return lines.join(NL) + NL;
   }
 
   lines.push("");
-  lines.push(`Merged ${outcome.merged.length}. Run 'x-sage graph generate' to update graph.json.`);
+  // A body-only merge cannot change graph.json or MANIFEST.md: both are built
+  // from frontmatter. Only ask for a rebuild when something actually did.
+  lines.push(
+    outcome.derivedStale
+      ? `Merged ${outcome.merged.length}. Run 'x-sage graph generate --manifest' to update graph.json and MANIFEST.md.`
+      : `Merged ${outcome.merged.length}. graph.json and MANIFEST.md are unchanged (body-only).`,
+  );
+  if (outcome.conflicts.length > 0) {
+    // The proposal is still reviewable; the caller has to re-read and resubmit.
+    lines.push(
+      `${outcome.conflicts.length} proposal(s) conflict with the current concept. Re-read it with 'x-sage concept body <id>' and submit again.`,
+    );
+  }
   return lines.join(NL) + NL;
 }
 

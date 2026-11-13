@@ -215,7 +215,22 @@ describe("write protection", () => {
       headers: { "content-type": "application/json", authorization: "Bearer s3cret" },
       body: JSON.stringify({ file: "nope.md" }),
     });
+    // 401 would mean auth failed; 404 means the token got through and the
+    // named proposal simply does not exist. A merge target that matches nothing
+    // is an error, not an empty success — that is how a typo'd filename used to
+    // report "nothing to merge" and exit 0.
+    expect(res.status).toBe(404);
+    expect((await json(res)).error).toContain("No such proposal");
+  });
+
+  test("merging everything with no pending proposals still succeeds", async () => {
+    const res = await guarded.request("/api/proposals/merge", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer s3cret" },
+      body: JSON.stringify({ file: "all" }),
+    });
     expect(res.status).toBe(200);
+    expect((await json(res)).merged).toEqual([]);
   });
 
   test("an oversized body is rejected before parsing", async () => {

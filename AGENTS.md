@@ -173,6 +173,7 @@ AI 可执行的写回操作：
 |------|---------|---------|
 | `propose-edge` | 发现未记录的概念关联 | `proposals/edges/` |
 | `refine-atom` | atom 描述不足以区分相似概念 | `proposals/atoms/` |
+| `refine-body` | 正文结论已被纠正，需整段改写 | `proposals/bodies/` |
 | `flag-tension` | 发现未记录的矛盾 | `frontier.md` |
 | `create-checkpoint` | 会话结束时固化推理进度 | `checkpoints/` |
 
