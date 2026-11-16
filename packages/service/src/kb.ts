@@ -7,12 +7,14 @@ export const LAYERS = ["L0-axioms", "L1-core", "L2-support", "L3-instances"] as 
  * A single knowledge base on disk.
  *
  * Every service function takes this instead of resolving paths itself, so the
- * same code serves the CLI (one KB from argv/env) and the HTTP server (one KB
- * per process, or per request once multi-KB routing exists).
+ * same code serves requests scoped to one KB. The dispatcher resolves an
+ * optional registry selection before invoking any use case.
  */
 export interface KbContext {
   /** Absolute path to the KB directory, e.g. `<repo>/kb/default`. */
   root: string;
+  /** Operator-owned registry; clients select IDs, never filesystem paths. */
+  registryPath?: string;
 }
 
 export function kb(root: string): KbContext {

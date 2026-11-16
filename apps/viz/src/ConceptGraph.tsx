@@ -84,7 +84,7 @@ export default function ConceptGraph({
 
   // Initialize / update simulation
   useEffect(() => {
-    if (filteredNodes.length === 0) return;
+    if (filteredNodes.length === 0) { setSimNodes([]); setSimEdges([]); setHoveredNodeId(null); setTooltip(null); return; }
 
     const width = dimensions.width;
     const height = dimensions.height;

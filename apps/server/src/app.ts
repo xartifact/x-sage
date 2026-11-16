@@ -10,6 +10,7 @@ import { readBuildInfo } from "./build-info.ts";
 export interface AppOptions {
   /** Absolute path to the KB directory. */
   kbRoot: string;
+  registryPath?: string | undefined;
   /** Origin allowed to call the API; defaults to any, which suits local dev. */
   corsOrigin?: string;
   /**
@@ -34,7 +35,7 @@ const isWrite = (method: string): boolean => WRITE_METHODS[method] === true;
  * a Response.
  */
 export function createApp(options: AppOptions) {
-  const ctx: KbContext = kb(options.kbRoot);
+  const ctx: KbContext = { ...kb(options.kbRoot), ...(options.registryPath ? { registryPath: options.registryPath } : {}) };
   const app = new Hono();
 
   app.use("*", cors({ origin: options.corsOrigin ?? "*" }));

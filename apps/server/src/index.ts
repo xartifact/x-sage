@@ -7,7 +7,9 @@ import { createApp } from "./app.ts";
  * Entry point for the HTTP server.
  *
  * Config comes from the environment so one build serves any KB:
- *   X_SAGE_KB       KB directory (default: <repo>/kb/default)
+ *   X_SAGE_KB       Default KB directory (default: <repo>/kb/default)
+ *   X_SAGE_REGISTRY Optional registry.json for selecting configured KBs.
+ *                   Repo registry is used by default unless X_SAGE_KB is set.
  *   PORT            listen port (default: 3001)
  *   HOST            bind address (default: 127.0.0.1 — not public by default)
  *   CORS_ORIGIN     allowed origin (default: *, fine for local dev)
@@ -44,6 +46,7 @@ if (writeToken === undefined && hostname !== "127.0.0.1" && hostname !== "localh
 
 const app = createApp({
   kbRoot,
+  registryPath: process.env.X_SAGE_REGISTRY ?? (process.env.X_SAGE_KB ? undefined : resolve(import.meta.dir, "../../../registry.json")),
   ...(corsOrigin === undefined ? {} : { corsOrigin }),
   ...(writeToken === undefined ? {} : { writeToken }),
 });

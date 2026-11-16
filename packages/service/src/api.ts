@@ -1,3 +1,11 @@
+import { ConceptIdSchema } from '@x-sage/core/types';
+import { catalog, CatalogUnavailableError } from './catalog.ts';
+import { mkdir, writeFile, link, unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { ConceptFrontmatterSchema, validateGraph, withKbLock, LockTimeoutError } from '@x-sage/core';
+import { loadConcepts } from './concepts.ts';
+import { LAYERS } from './kb.ts';
 import {
   EdgeTypeSchema,
   ConfidenceSchema,
@@ -194,14 +202,20 @@ export async function handleRequest(
   const format = parseFormat(query, accept);
 
   try {
-    return await route(ctx, method, path, query, request, format);
+    const entries = path === '/knowledge-bases' || query.kb !== undefined ? await catalog(ctx) : [];
+    if (path === '/knowledge-bases' && method === 'GET') return json(200, { knowledgeBases: entries.map(({id,name,root}) => ({id,name,isDefault:root === ctx.root})) });
+    const selected = query.kb === undefined ? undefined : entries.find(entry => entry.id === query.kb);
+    if (query.kb !== undefined && !selected) throw new ApiError(404, 'Unknown knowledge base');
+    return await route(selected ? {root:selected.root} : ctx, method, path, query, request, format);
   } catch (err) {
     // Status is chosen from the error type first. The old fallback matched on
     // the word "not found" in the message, which meant a conflict or a bad
     // request had to be phrased to look like a 404 to get one — and a typo'd
     // merge target silently reported success.
     const status =
-      err instanceof ApiError
+      err instanceof CatalogUnavailableError || err instanceof LockTimeoutError
+        ? 503
+        : err instanceof ApiError
         ? err.status
         : err instanceof ProposalTargetNotFoundError
           ? 404
@@ -211,7 +225,9 @@ export async function handleRequest(
               ? 404
               : 400;
     const message =
-      err instanceof ApiError
+      err instanceof LockTimeoutError
+        ? "Knowledge base is busy; retry after the current write completes"
+        : err instanceof ApiError
         ? err.message
         : err instanceof Error
           ? err.message
@@ -235,6 +251,40 @@ async function route(
   request: ApiRequest,
   format: Format,
 ): Promise<ApiResponse> {
+  if (path === '/concepts' && method === 'POST') {
+    const body = requireBody(request);
+    const parsed = ConceptFrontmatterSchema.safeParse(body.frontmatter);
+    if (!parsed.success || !ConceptIdSchema.safeParse(parsed.data?.id).success) throw new ApiError(400, 'Invalid concept metadata or id');
+    const meta = parsed.data;
+    const molecule = requireField(body, 'body');
+    if (!molecule.trim()) throw new ApiError(400, 'Concept body cannot be empty');
+    // Share the proposal merge lock so creation and merge cannot interleave.
+    // Do not steal a lock solely because an unusually slow writer took >30s.
+    return withKbLock(ctx.root, async () => {
+    const existing = await loadConcepts(ctx);
+    if (existing.concepts.some(c => c.file.frontmatter.id === meta.id)) throw new ApiError(409, 'Concept already exists');
+    const graph = await buildGraph(ctx);
+    graph.nodes.push({...meta,filePath:''});
+    graph.edges.push(...meta.edges.map(edge => ({...edge,from:meta.id})));
+    const issues = validateGraph(graph).issues.filter(issue => issue.type !== 'orphan-node');
+    if (issues.length) throw new ApiError(400, issues.map(i=>i.message).join('; '));
+    const dir = join(ctx.root, 'concepts', LAYERS[meta.layer]!);
+    await mkdir(dir,{recursive:true});
+    const temp = join(dir, '.'+randomUUID()+'.tmp');
+    try {
+      await writeFile(temp, '---\n'+JSON.stringify(meta,null,2)+'\n---\n'+molecule+'\n',{flag:'wx'});
+      await link(temp,join(dir,meta.id+'.md'));
+    } catch(error) {
+      if ((error as {code?:string}).code === 'EEXIST') throw new ApiError(409,'Concept already exists');
+      throw error;
+    } finally { await unlink(temp).catch(()=>{}); }
+    // The source concept is committed. Report a repairable derived-artifact
+    // failure without falsely telling the caller creation failed.
+    try { await writeGraph(ctx); await writeManifest(ctx); }
+    catch { return json(201,{id:meta.id, warning:'Concept created; rebuild graph and manifest to repair generated artifacts'}); }
+    return json(201,{id:meta.id});
+    }, { staleAfterMs: Number.POSITIVE_INFINITY });
+  }
   // ---- identity ----
   if (path === "/health" && method === "GET") {
     return json(200, { ok: true, kb: ctx.root });
@@ -440,6 +490,8 @@ async function route(
   const checkpointMatch = /^\/checkpoints\/([^/]+)$/.exec(path);
   if (checkpointMatch !== null) {
     const concept = decodeURIComponent(checkpointMatch[1]!);
+    if (!ConceptIdSchema.safeParse(concept).success) throw new ApiError(400, 'Invalid checkpoint concept id');
+    if (query.session !== undefined && (!/^[1-9][0-9]*$/.test(query.session) || !Number.isSafeInteger(Number(query.session)))) throw new ApiError(400, 'Invalid checkpoint session');
 
     if (method === "GET") {
       const checkpoint = await getCheckpoint(ctx, concept, intParam(query, "session"));
@@ -452,6 +504,7 @@ async function route(
     if (method === "POST") {
       const body = request.body === undefined ? {} : requireBody(request);
       const sessionNumber = body.sessionNumber;
+      if (sessionNumber !== undefined && (typeof sessionNumber !== 'number' || !Number.isSafeInteger(sessionNumber) || sessionNumber < 1)) throw new ApiError(400, 'Invalid checkpoint session');
       const checkpoint = await createCheckpoint(
         ctx,
         concept,
@@ -671,7 +724,7 @@ async function proposalDetail(
     if (known === undefined) throw new ProposalTargetNotFoundError(file);
     return format === "text"
       ? text(200, `Proposal ${file} has no body diff.\n`)
-      : json(200, { file, kind: "atom" in known ? "atom" : "edge", proposal: known });
+      : json(200, { file, kind: "proposedAtom" in known ? "atom" : "edge", proposal: known });
   }
 
   const live = await readBody(ctx, proposal.conceptId);

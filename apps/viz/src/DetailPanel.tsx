@@ -28,6 +28,7 @@ const EDGE_TYPE_CLASSES: Record<EdgeType, string> = {
 function renderMoleculeAsHtml(molecule: string): string {
   // Simple markdown-to-HTML conversion for molecule display
   return molecule
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")
     .replace(/^#\s+(.+)$/gm, "<h1>$1</h1>")
     .replace(/^##\s+(.+)$/gm, "<h2>$1</h2>")
     .replace(/^###\s+(.+)$/gm, "<h3>$1</h3>")
