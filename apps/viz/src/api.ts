@@ -1,4 +1,7 @@
-const base = import.meta.env.VITE_API_BASE ?? "";
+const base = import.meta.env?.VITE_API_BASE ?? "";
+export class ApiError extends Error {
+  constructor(message:string, readonly status:number, readonly payload:unknown){super(message);this.name='ApiError';}
+}
 export async function api(
   kb: string,
   path: string,
@@ -20,6 +23,6 @@ export async function api(
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const value = await res.json();
-  if (!res.ok) throw new Error(value.error ?? JSON.stringify(value));
+  if (!res.ok) throw new ApiError(value.error ?? JSON.stringify(value), res.status, value);
   return value;
 }

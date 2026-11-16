@@ -1,203 +1,155 @@
-import { LAYER_COLORS, LAYER_LABELS, EDGE_LABELS, EDGE_COLORS } from "./types";
-import type { GraphNode, GraphEdge, EdgeType } from "./types";
+import MarkdownContent from "./MarkdownContent";
+import { X, Pencil, ArrowRight, ArrowLeft, ArrowLeftRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { LAYER_LABELS, EDGE_LABELS } from "./types";
+import type { GraphNode, GraphEdge } from "./types";
 
 interface DetailPanelProps {
   node: GraphNode | null;
   edges: GraphEdge[];
   allNodes: GraphNode[];
   onClose: () => void;
+  onSelect?: (id: string) => void;
+  onEdit?: (id: string) => void;
 }
 
-function getChineseName(node: GraphNode): string {
-  // Extract first heading from molecule as Chinese name
-  const match = node.molecule.match(/^#\s+(.+?)\s/);
-  if (match && match[1]) return match[1];
-  return node.id;
+function name(node: GraphNode): string {
+  return node.molecule.match(/^#\s+(.+)$/m)?.[1]?.trim() || node.id;
 }
 
-const EDGE_TYPE_CLASSES: Record<EdgeType, string> = {
-  "is-a": "edge-type-is-a",
-  "part-of": "edge-type-part-of",
-  "depends-on": "edge-type-depends-on",
-  enables: "edge-type-enables",
-  instantiates: "edge-type-instantiates",
-  contradicts: "edge-type-contradicts",
-  "analogous-to": "edge-type-analogous-to",
-};
-
-function renderMoleculeAsHtml(molecule: string): string {
-  // Simple markdown-to-HTML conversion for molecule display
-  return molecule
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")
-    .replace(/^#\s+(.+)$/gm, "<h1>$1</h1>")
-    .replace(/^##\s+(.+)$/gm, "<h2>$1</h2>")
-    .replace(/^###\s+(.+)$/gm, "<h3>$1</h3>")
-    .replace(/^####\s+(.+)$/gm, "<h4>$1</h4>")
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/^-\s+(.+)$/gm, "<li>$1</li>")
-    .replace(/(<li>.*<\/li>)/s, "<ul>$1</ul>")
-    .replace(/\n\n/g, "<p></p>")
-    .replace(/\n/g, "<br>");
-}
-
-export default function DetailPanel({ node, edges, allNodes, onClose }: DetailPanelProps) {
+export default function DetailPanel({
+  node,
+  edges,
+  allNodes,
+  onClose,
+  onSelect,
+  onEdit,
+}: DetailPanelProps) {
   if (!node) return null;
-
-  const chineseName = getChineseName(node);
-  const nodeEdges = edges.filter(
-    (e) => e.from === node.id || e.target === node.id
+  const connected = edges.filter(
+    (e) => e.from === node.id || e.target === node.id,
   );
-
-  // Group edges by type
-  const edgesByType = new Map<EdgeType, GraphEdge[]>();
-  nodeEdges.forEach((edge) => {
-    const list = edgesByType.get(edge.type) || [];
-    list.push(edge);
-    edgesByType.set(edge.type, list);
+  // Symmetric API relationships may contain both directions; show one connection.
+  const seen = new Set<string>();
+  const links = connected.filter((edge) => {
+    const other = edge.from === node.id ? edge.target : edge.from;
+    const symmetric =
+      edge.type === "contradicts" || edge.type === "analogous-to";
+    const key = symmetric
+      ? `${edge.type}:${other}`
+      : `${edge.from}:${edge.type}:${edge.target}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
-
-  const getNodeName = (id: string) => {
-    const n = allNodes.find((n) => n.id === id);
-    return n ? getChineseName(n) : id;
-  };
-
-  // These two lists used to read hand-maintained frontmatter arrays that had
-  // already drifted from the edge list. Read the asserted edges instead.
-  const directEdges = (type: EdgeType) =>
-    edges.filter((e) => e.from === node.id && e.type === type).map((e) => e.target);
-
   return (
-    <div className={`detail-panel ${node ? "open" : ""}`}>
-      <div className="detail-panel-header">
-        <div>
-          <h2 className="detail-panel-title" lang="zh-CN">
-            {chineseName}
+    <aside
+      aria-label="概念详情"
+      className="flex h-full min-h-0 flex-col bg-background"
+    >
+      <header className="flex items-start gap-2 border-b p-4">
+        <div className="min-w-0 flex-1">
+          <h2 className="break-words text-base font-semibold leading-relaxed">
+            {name(node)}
           </h2>
-          <p className="detail-panel-subtitle">{node.id}</p>
+          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+            {node.id}
+          </p>
         </div>
-        <button className="detail-panel-close" onClick={onClose} aria-label="关闭">
-          ×
-        </button>
-      </div>
-
-      <div className="detail-panel-body">
-        {/* Atom */}
-        <div className="detail-section">
-          <div className="detail-section-title">Atom</div>
-          <div className="detail-atom" lang="zh-CN">{node.atom}</div>
-        </div>
-
-        {/* Badges */}
-        <div className="detail-section">
-          <div className="detail-section-title">属性</div>
-          <div>
-            <span className={`detail-badge layer-l${node.layer}`}>
-              {LAYER_LABELS[node.layer]}
-            </span>
-            <span className="detail-badge confidence">
-              {node.confidence}
-            </span>
-            <span className="detail-badge source">
-              {node.source}
-            </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClose}
+          aria-label="关闭概念详情"
+        >
+          <X className="size-4" />
+        </Button>
+      </header>
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+        <section className="space-y-3">
+          <div className="flex flex-wrap gap-1.5">
+            <Badge variant="secondary">{LAYER_LABELS[node.layer]}</Badge>
+            <Badge variant="outline">{node.confidence}</Badge>
+            <Badge variant="outline">{node.source}</Badge>
           </div>
-        </div>
-
-        {/* Domains */}
-        <div className="detail-section">
-          <div className="detail-section-title">领域</div>
-          <div>
+          <p className="text-sm leading-7">{node.atom}</p>
+          {onEdit && (
+            <Button variant="outline" size="sm" onClick={() => onEdit(node.id)}>
+              <Pencil className="size-3.5" />
+              修订概念
+            </Button>
+          )}
+        </section>
+        <Separator />
+        <section className="space-y-3">
+          <h3 className="text-xs font-medium text-muted-foreground">
+            领域与触发词
+          </h3>
+          <div className="flex flex-wrap gap-1.5">
             {node.domain.map((d) => (
-              <span key={d} className="detail-badge domain">
+              <Badge key={`domain-${d}`} variant="secondary">
                 {d}
-              </span>
+              </Badge>
             ))}
-          </div>
-        </div>
-
-        {/* Triggers */}
-        <div className="detail-section">
-          <div className="detail-section-title">触发词</div>
-          <div>
             {node.triggers.map((t) => (
-              <span key={t} className="detail-badge trigger">
+              <Badge key={`trigger-${t}`} variant="outline">
                 {t}
-              </span>
+              </Badge>
             ))}
           </div>
-        </div>
-
-        {/* Requires */}
-        {directEdges("depends-on").length > 0 && (
-          <div className="detail-section">
-            <div className="detail-section-title">依赖</div>
-            <ul className="detail-edge-list">
-              {directEdges("depends-on").map((id) => (
-                <li key={id} className="detail-edge-item">
-                  <span
-                    className="filter-color-dot"
-                    style={{ backgroundColor: LAYER_COLORS[allNodes.find((n) => n.id === id)?.layer ?? 0] }}
-                  />
-                  {getNodeName(id)} ({id})
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Enables */}
-        {directEdges("enables").length > 0 && (
-          <div className="detail-section">
-            <div className="detail-section-title">启用</div>
-            <ul className="detail-edge-list">
-              {directEdges("enables").map((id) => (
-                <li key={id} className="detail-edge-item">
-                  <span
-                    className="filter-color-dot"
-                    style={{ backgroundColor: LAYER_COLORS[allNodes.find((n) => n.id === id)?.layer ?? 0] }}
-                  />
-                  {getNodeName(id)} ({id})
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Edges */}
-        {nodeEdges.length > 0 && (
-          <div className="detail-section">
-            <div className="detail-section-title">连接 ({nodeEdges.length})</div>
-            <ul className="detail-edge-list">
-              {nodeEdges.map((edge, idx) => {
-                const isOutgoing = edge.from === node.id;
-                const otherId = isOutgoing ? edge.target : edge.from;
-                const otherName = getNodeName(otherId);
-                return (
-                  <li key={idx} className="detail-edge-item">
-                    <span className={`detail-edge-type ${EDGE_TYPE_CLASSES[edge.type]}`}>
-                      {EDGE_LABELS[edge.type]}
-                    </span>
-                    <span>
-                      {isOutgoing ? "→" : "←"} {otherName} ({otherId})
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-
-        {/* Molecule */}
-        <div className="detail-section">
-          <div className="detail-section-title">Molecule</div>
-          <div
-            className="detail-molecule"
-            lang="zh-CN"
-            dangerouslySetInnerHTML={{ __html: renderMoleculeAsHtml(node.molecule) }}
-          />
-        </div>
+        </section>
+        <Separator />
+        <section className="space-y-2">
+          <h3 className="text-xs font-medium text-muted-foreground">
+            关联概念 · {links.length}
+          </h3>
+          {links.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              尚未建立关联。可通过修订概念添加。
+            </p>
+          )}
+          {links.map((edge) => {
+            const out = edge.from === node.id,
+              other = out ? edge.target : edge.from,
+              target = allNodes.find((n) => n.id === other),
+              symmetric =
+                edge.type === "contradicts" || edge.type === "analogous-to";
+            const Icon = symmetric
+              ? ArrowLeftRight
+              : out
+                ? ArrowRight
+                : ArrowLeft;
+            return (
+              <Button
+                key={`${edge.from}:${edge.type}:${edge.target}`}
+                variant="ghost"
+                className="h-auto w-full justify-start gap-2 whitespace-normal px-2 py-2 text-left"
+                disabled={!target || !onSelect}
+                onClick={() => onSelect?.(other)}
+              >
+                <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0">
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    {EDGE_LABELS[edge.type]}
+                  </span>
+                  <span className="block break-words text-sm">
+                    {target ? name(target) : other}
+                  </span>
+                </span>
+              </Button>
+            );
+          })}
+        </section>
+        <Separator />
+        <section className="space-y-3">
+          <h3 className="text-xs font-medium text-muted-foreground">
+            完整概念
+          </h3>
+          <MarkdownContent content={node.molecule} />
+        </section>
       </div>
-    </div>
+    </aside>
   );
 }

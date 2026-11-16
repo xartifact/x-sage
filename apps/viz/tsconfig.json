@@ -2,10 +2,21 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "lib": ["ESNext", "DOM"],
+    "lib": [
+      "ESNext",
+      "DOM"
+    ],
     "paths": {
-      "@x-sage/core": ["../../packages/core/src/index.ts"]
+      "@x-sage/core": [
+        "../../packages/core/src/index.ts"
+      ],
+      "@/*": [
+        "./src/*"
+      ]
     }
   },
-  "include": ["src/**/*", "src/vite-env.d.ts"]
+  "include": [
+    "src/**/*",
+    "src/vite-env.d.ts"
+  ]
 }

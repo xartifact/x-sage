@@ -1,4 +1,14 @@
-import { EDGE_COLORS, EDGE_LABELS, EDGE_TYPES, LAYER_COLORS, LAYER_LABELS, LAYERS } from "./types";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
+import {
+  EDGE_COLORS,
+  EDGE_LABELS,
+  EDGE_TYPES,
+  LAYER_COLORS,
+  LAYER_LABELS,
+  LAYERS,
+} from "./types";
 import type { Layer, EdgeType } from "./types";
 
 interface FilterControlsProps {
@@ -17,49 +27,71 @@ export default function FilterControls({
   onToggleEdgeType,
 }: FilterControlsProps) {
   return (
-    <div className="filter-controls">
-      <h3>筛选</h3>
-
-      <div className="filter-group">
-        <div className="filter-group-title">层级</div>
+    <section aria-label="图谱筛选" className="space-y-5 p-4">
+      <div>
+        <h2 className="text-sm font-semibold">图谱筛选</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          按层级与关系组织当前视图
+        </p>
+      </div>
+      <fieldset className="space-y-1">
+        <legend className="mb-2 text-xs font-medium text-muted-foreground">
+          概念层级
+        </legend>
         {LAYERS.map((layer) => (
-          <label key={layer} className="filter-item">
-            <input
-              type="checkbox"
+          <label
+            key={layer}
+            className={cn(
+              "flex min-h-9 cursor-pointer items-center gap-2.5 rounded-md px-2 text-sm hover:bg-accent",
+              !visibleLayers.has(layer) && "text-muted-foreground",
+            )}
+          >
+            <Checkbox
               checked={visibleLayers.has(layer)}
-              onChange={() => onToggleLayer(layer)}
+              onCheckedChange={() => onToggleLayer(layer)}
+              aria-label={LAYER_LABELS[layer]}
             />
             <span
-              className="filter-color-dot"
+              aria-hidden
+              className="size-2 shrink-0 rounded-full"
               style={{ backgroundColor: LAYER_COLORS[layer] }}
             />
             <span>{LAYER_LABELS[layer]}</span>
-            {/* The count is the whole point: a hidden layer that silently holds
-                most of the KB reads as "my new concepts never deployed". */}
-            {layerCounts ? (
-              <span className="filter-item-count">{layerCounts[`L${layer}`] ?? 0}</span>
-            ) : null}
+            {layerCounts && (
+              <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                {layerCounts[`L${layer}`] ?? 0}
+              </span>
+            )}
           </label>
         ))}
-      </div>
-
-      <div className="filter-group">
-        <div className="filter-group-title">关系类型</div>
+      </fieldset>
+      <Separator />
+      <fieldset className="space-y-1">
+        <legend className="mb-2 text-xs font-medium text-muted-foreground">
+          关系类型
+        </legend>
         {EDGE_TYPES.map((type) => (
-          <label key={type} className="filter-item">
-            <input
-              type="checkbox"
+          <label
+            key={type}
+            className={cn(
+              "flex min-h-9 cursor-pointer items-center gap-2.5 rounded-md px-2 text-sm hover:bg-accent",
+              !visibleEdgeTypes.has(type) && "text-muted-foreground",
+            )}
+          >
+            <Checkbox
               checked={visibleEdgeTypes.has(type)}
-              onChange={() => onToggleEdgeType(type)}
+              onCheckedChange={() => onToggleEdgeType(type)}
+              aria-label={EDGE_LABELS[type]}
             />
             <span
-              className="filter-color-dot"
+              aria-hidden
+              className="h-0.5 w-3 shrink-0"
               style={{ backgroundColor: EDGE_COLORS[type] }}
             />
             <span>{EDGE_LABELS[type]}</span>
           </label>
         ))}
-      </div>
-    </div>
+      </fieldset>
+    </section>
   );
 }

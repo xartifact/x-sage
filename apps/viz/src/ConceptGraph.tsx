@@ -1,4 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import { Button } from "@/components/ui/button";
+import { Maximize2, RotateCcw, Network } from "lucide-react";
 import * as d3 from "d3";
 import { LAYER_COLORS, NODE_RADIUS, EDGE_COLORS } from "./types";
 import type { GraphNode, GraphEdge, Layer, EdgeType } from "./types";
@@ -29,13 +31,30 @@ function getNodeId(d: string | number | SimulationNode): string {
   return d.id;
 }
 
-function getNodeCoords(d: string | number | SimulationNode): { x: number; y: number } {
+function getNodeCoords(d: string | number | SimulationNode): {
+  x: number;
+  y: number;
+} {
   if (typeof d === "string" || typeof d === "number") return { x: 0, y: 0 };
   return { x: d.x ?? 0, y: d.y ?? 0 };
 }
 
+function fittedView(nodes: SimulationNode[]): string {
+  const xs = nodes.map((node) => node.x ?? 0),
+    ys = nodes.map((node) => node.y ?? 0);
+  const padding = 96;
+  const left = Math.min(...xs) - padding,
+    top = Math.min(...ys) - padding;
+  return [
+    left,
+    top,
+    Math.max(...xs) - left + padding,
+    Math.max(...ys) - top + padding,
+  ].join(" ");
+}
+
 function getChineseName(node: GraphNode): string {
-  const match = node.molecule.match(/^#\s+(.+?)\s/);
+  const match = node.molecule.match(/^#\s+(.+)$/m);
   if (match && match[1]) return match[1];
   return node.id;
 }
@@ -48,27 +67,42 @@ export default function ConceptGraph({
   onNodeClick,
   selectedNodeId,
 }: ConceptGraphProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const positions = useRef(new Map<string, { x: number; y: number }>());
+  const viewport = useRef("");
+  const dragging = useRef<string | null>(null);
+  const [view, setView] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
-  const simulationRef = useRef<d3.Simulation<SimulationNode, SimulationEdge> | null>(null);
+  const simulationRef = useRef<d3.Simulation<
+    SimulationNode,
+    SimulationEdge
+  > | null>(null);
   const [simNodes, setSimNodes] = useState<SimulationNode[]>([]);
   const [simEdges, setSimEdges] = useState<SimulationEdge[]>([]);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
-  const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
+  const [tooltip, setTooltip] = useState<{
+    x: number;
+    y: number;
+    text: string;
+  } | null>(null);
+  const [dimensions, setDimensions] = useState({ width: 640, height: 480 });
 
-  // Update dimensions on resize
   useEffect(() => {
-    const handleResize = () => {
-      setDimensions({ width: window.innerWidth, height: window.innerHeight });
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    const element = containerRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (box && box.width > 0 && box.height > 0)
+        setDimensions({ width: box.width, height: box.height });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
   }, []);
 
   // Filter visible nodes and edges
   const filteredNodes = useMemo(
     () => nodes.filter((n) => visibleLayers.has(n.layer)),
-    [nodes, visibleLayers]
+    [nodes, visibleLayers],
   );
 
   const filteredEdges = useMemo(
@@ -77,22 +111,35 @@ export default function ConceptGraph({
         (e) =>
           visibleEdgeTypes.has(e.type) &&
           filteredNodes.some((n) => n.id === e.from) &&
-          filteredNodes.some((n) => n.id === e.target)
+          filteredNodes.some((n) => n.id === e.target),
       ),
-    [edges, visibleEdgeTypes, filteredNodes]
+    [edges, visibleEdgeTypes, filteredNodes],
   );
 
   // Initialize / update simulation
   useEffect(() => {
-    if (filteredNodes.length === 0) { setSimNodes([]); setSimEdges([]); setHoveredNodeId(null); setTooltip(null); return; }
+    const liveIds = new Set(nodes.map((node) => node.id));
+    for (const id of positions.current.keys())
+      if (!liveIds.has(id)) positions.current.delete(id);
+    if (filteredNodes.length === 0) {
+      setSimNodes([]);
+      setSimEdges([]);
+      setHoveredNodeId(null);
+      setTooltip(null);
+      return;
+    }
 
     const width = dimensions.width;
     const height = dimensions.height;
 
     const simNodes: SimulationNode[] = filteredNodes.map((n) => ({
       ...n,
-      x: width / 2 + (Math.random() - 0.5) * 100,
-      y: height / 2 + (Math.random() - 0.5) * 100,
+      x:
+        positions.current.get(n.id)?.x ??
+        width / 2 + (Math.random() - 0.5) * 100,
+      y:
+        positions.current.get(n.id)?.y ??
+        height / 2 + (Math.random() - 0.5) * 100,
     }));
 
     const simEdges: SimulationEdge[] = filteredEdges.map((e) => ({
@@ -109,20 +156,40 @@ export default function ConceptGraph({
           .forceLink<SimulationNode, SimulationEdge>(simEdges)
           .id((d) => d.id)
           .distance((d) => (d.type === "contradicts" ? 180 : 120))
-          .strength(0.5)
+          .strength(0.5),
       )
       .force("charge", d3.forceManyBody().strength(-400))
       .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collide", d3.forceCollide<SimulationNode>().radius((d) => NODE_RADIUS[d.layer] + 12).strength(0.8))
+      .force(
+        "collide",
+        d3
+          .forceCollide<SimulationNode>()
+          .radius((d) => NODE_RADIUS[d.layer] + 12)
+          .strength(0.8),
+      )
       .force("x", d3.forceX(width / 2).strength(0.05))
       .force("y", d3.forceY(height / 2).strength(0.05))
       .alphaDecay(0.02)
       .velocityDecay(0.4);
 
-    simulation.on("tick", () => {
+    const publish = () => {
+      for (const node of simNodes)
+        positions.current.set(node.id, { x: node.x ?? 0, y: node.y ?? 0 });
       setSimNodes([...simNodes]);
       setSimEdges([...simEdges]);
-    });
+    };
+    // Background tabs can defer animation frames indefinitely. Publish a useful
+    // initial layout without waiting for D3 timer delivery.
+    simulation.tick(30);
+    publish();
+    const viewportKey = `${width}:${height}`;
+    if (viewport.current !== viewportKey) {
+      // A narrow canvas starts with the entire graph visible. Resize/orientation
+      // changes recalculate the fit; manual reset stays until the next resize.
+      setView(width <= 640 ? fittedView(simNodes) : null);
+      viewport.current = viewportKey;
+    }
+    simulation.on("tick", publish);
 
     simulationRef.current = simulation;
 
@@ -131,39 +198,39 @@ export default function ConceptGraph({
     };
   }, [filteredNodes, filteredEdges, dimensions]);
 
-  // Drag behavior
-  const handleDragStart = useCallback(
-    (event: React.MouseEvent | React.TouchEvent, node: SimulationNode) => {
-      if (!simulationRef.current) return;
-      event.preventDefault();
-      simulationRef.current.alphaTarget(0.3).restart();
-      node.fx = node.x;
-      node.fy = node.y;
-    },
-    []
-  );
-
-  const handleDragMove = useCallback(
-    (event: React.MouseEvent | React.TouchEvent, node: SimulationNode) => {
-      if (!simulationRef.current) return;
-      const svg = svgRef.current;
-      if (!svg) return;
-      const point = d3.pointer(event, svg);
-      node.fx = point[0];
-      node.fy = point[1];
-    },
-    []
-  );
-
-  const handleDragEnd = useCallback(
-    (_event: React.MouseEvent | React.TouchEvent, node: SimulationNode) => {
-      if (!simulationRef.current) return;
-      simulationRef.current.alphaTarget(0);
-      node.fx = null;
-      node.fy = null;
-    },
-    []
-  );
+  const startDrag = (
+    event: React.PointerEvent<SVGGElement>,
+    node: SimulationNode,
+  ) => {
+    if (event.button !== 0) return;
+    dragging.current = node.id;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    simulationRef.current?.alphaTarget(0.2).restart();
+    node.fx = node.x;
+    node.fy = node.y;
+  };
+  const moveDrag = (
+    event: React.PointerEvent<SVGGElement>,
+    node: SimulationNode,
+  ) => {
+    if (dragging.current !== node.id || !svgRef.current) return;
+    const point = d3.pointer(event, svgRef.current);
+    node.fx = point[0];
+    node.fy = point[1];
+  };
+  const endDrag = (
+    _event: React.PointerEvent<SVGGElement>,
+    node: SimulationNode,
+  ) => {
+    dragging.current = null;
+    node.fx = null;
+    node.fy = null;
+    simulationRef.current?.alphaTarget(0);
+  };
+  const fit = () => {
+    if (!simNodes.length) return;
+    setView(fittedView(simNodes));
+  };
 
   // Compute neighbor sets for hover highlight
   const neighborSet = useMemo(() => {
@@ -197,19 +264,19 @@ export default function ConceptGraph({
         onNodeClick(null);
       }
     },
-    [onNodeClick]
+    [onNodeClick],
   );
 
   const handleNodeHover = useCallback(
     (node: SimulationNode, event: React.MouseEvent) => {
       setHoveredNodeId(node.id);
       setTooltip({
-        x: event.clientX + 16,
-        y: event.clientY - 8,
+        x: Math.min(event.clientX + 16, window.innerWidth - 300),
+        y: Math.max(8, event.clientY - 8),
         text: node.atom,
       });
     },
-    []
+    [],
   );
 
   const handleNodeLeave = useCallback(() => {
@@ -218,11 +285,43 @@ export default function ConceptGraph({
   }, []);
 
   return (
-    <>
+    <div
+      ref={containerRef}
+      className="relative h-full min-h-80 w-full overflow-hidden bg-muted/20"
+    >
+      <div className="absolute right-3 top-3 z-10 flex gap-1 rounded-lg border bg-background/95 p-1 shadow-sm">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={fit}
+          disabled={simNodes.length === 0}
+          aria-label="适应全部节点"
+          title="适应全部节点"
+        >
+          <Maximize2 className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setView(null)}
+          aria-label="重置视图"
+          title="重置视图"
+        >
+          <RotateCcw className="size-4" />
+        </Button>
+      </div>
+      {filteredNodes.length === 0 && (
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center text-muted-foreground">
+          <Network className="size-8" />
+          <p className="text-sm">当前视图没有概念</p>
+          <p className="text-xs">调整筛选条件，或创建第一个概念。</p>
+        </div>
+      )}
       <svg
         ref={svgRef}
-        className="graph-svg"
-        viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
+        className="graph-svg h-full w-full touch-none"
+        aria-label="知识概念关系图"
+        viewBox={view ?? `0 0 ${dimensions.width} ${dimensions.height}`}
         onClick={handleSvgClick}
       >
         <defs>
@@ -236,7 +335,9 @@ export default function ConceptGraph({
               refY={0}
               /* Symmetric relations render undirected; an arrowhead would imply
                  a direction the relation does not have. */
-              markerWidth={type === "contradicts" || type === "analogous-to" ? 0 : 6}
+              markerWidth={
+                type === "contradicts" || type === "analogous-to" ? 0 : 6
+              }
               markerHeight={6}
               orient="auto"
             >
@@ -299,12 +400,23 @@ export default function ConceptGraph({
                 style={{ transition: "opacity 150ms ease" }}
                 onMouseEnter={(e) => handleNodeHover(node, e)}
                 onMouseLeave={handleNodeLeave}
-                onMouseDown={(e) => handleDragStart(e, node)}
-                onMouseMove={(e) => handleDragMove(e, node)}
-                onMouseUp={(e) => handleDragEnd(e, node)}
-                onTouchStart={(e) => handleDragStart(e, node)}
-                onTouchMove={(e) => handleDragMove(e, node)}
-                onTouchEnd={(e) => handleDragEnd(e, node)}
+                role="button"
+                tabIndex={0}
+                aria-label={getChineseName(node)}
+                aria-pressed={isSelected}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onNodeClick(node);
+                  }
+                  if (e.key === "Escape") onNodeClick(null);
+                }}
+                onFocus={() => setHoveredNodeId(node.id)}
+                onBlur={handleNodeLeave}
+                onPointerDown={(e) => startDrag(e, node)}
+                onPointerMove={(e) => moveDrag(e, node)}
+                onPointerUp={(e) => endDrag(e, node)}
+                onPointerCancel={(e) => endDrag(e, node)}
                 onClick={(e) => {
                   e.stopPropagation();
                   onNodeClick(node);
@@ -323,7 +435,9 @@ export default function ConceptGraph({
                   }}
                 />
                 <text className="node-label" dy={1}>
-                  {getChineseName(node)}
+                  {getChineseName(node).length > 12
+                    ? getChineseName(node).slice(0, 12) + "…"
+                    : getChineseName(node)}
                 </text>
               </g>
             );
@@ -334,13 +448,13 @@ export default function ConceptGraph({
       {/* Tooltip */}
       {tooltip && (
         <div
-          className={`atom-tooltip ${tooltip ? "visible" : ""}`}
+          className="pointer-events-none fixed z-50 max-w-72 rounded-lg border bg-popover p-3 text-xs leading-relaxed text-popover-foreground shadow-lg"
           style={{ left: tooltip.x, top: tooltip.y }}
           lang="zh-CN"
         >
           {tooltip.text}
         </div>
       )}
-    </>
+    </div>
   );
 }

@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
 
@@ -6,9 +7,10 @@ import { resolve } from "node:path";
 const API_TARGET = process.env.X_SAGE_API ?? "http://127.0.0.1:3001";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
+      "@": resolve(__dirname, "src"),
       "@x-sage/core": resolve(__dirname, "../../packages/core/src/index.ts"),
     },
   },

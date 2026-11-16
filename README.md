@@ -217,3 +217,18 @@ X_SAGE_REGISTRY=/data/registry.json X_SAGE_KB=/data/kb/default bun run server
 创建概念与提案合并共用 `.write.lock`。创建过程不会按锁年龄强行抢锁；异常退出后如遗留锁，
 必须先确认没有活动写入再由运维清理。创建成功但派生图/索引更新失败时会返回提示，
 可在网页执行“重建图与索引”；不要为此重复创建概念。
+
+### 前端技术栈与组件规范
+
+`apps/viz` 使用 React 19、TypeScript、Vite 6、Tailwind CSS 4、shadcn/ui（Radix）和 `cn`，
+D3 7 继续负责图谱布局。shadcn 的官方 new-york-v4 组件源码位于 `src/components/ui/`，
+配置位于 `components.json`；统一通过 `src/lib/utils.ts` 导出 `cn` 类名合并函数。
+组件源码来源：https://ui.shadcn.com/r/styles/new-york-v4/ 。
+
+视觉变量统一来自 `src/xartifact-tokens.css`，支持鸢尾紫、海洋蓝、松石绿、陶土橙四套配色，
+以及浅色、深色、跟随系统。偏好保存在浏览器本地，凭据仍只保留于当前维护弹窗。
+
+浏览页由概念目录、可自适应的图谱和上下文详情组成；Cmd/Ctrl+K 聚焦搜索。
+详情的关系目标可直接跳转，编辑入口会带入当前概念。维护弹窗使用受控表单与未保存确认，
+会话快照提供结构化编辑，不再要求手写 JSON。图谱在后台标签页也先绘制初始节点，
+窄屏自动适应范围，避免等待动画帧后才出现内容。
