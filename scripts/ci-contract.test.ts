@@ -294,3 +294,109 @@ describe("multi-arch build safety", () => {
     expect(workflow).toContain("path: viz-dist/");
   });
 });
+
+describe("client install", () => {
+  const installer = () => read("scripts/install-cli.sh");
+
+  test("pins one commit before downloading anything", async () => {
+    // Downloading per file from a floating branch mixes versions when upstream
+    // pushes mid-install: index.ts from one commit, build-info.ts from another.
+    const script = await installer();
+    const resolve = script.indexOf("resolve_commit");
+    const fetchLoop = script.indexOf('fetch "$BASE/$COMMIT');
+    expect(resolve).toBeGreaterThan(-1);
+    expect(fetchLoop).toBeGreaterThan(resolve);
+    expect(script).toContain('"$BASE/$COMMIT/apps/cli/src/$file"');
+    expect(script).toContain('"$BASE/$COMMIT/skills/x-sage-kb/$file"');
+    // No download path may still use the floating ref.
+    expect(script).not.toMatch(/\$BASE\/\$REF/);
+  });
+
+  test("never overwrites its entry point with a redirect", async () => {
+    // `> bin/x-sage` follows an existing symlink. On a development machine that
+    // link points into a working tree, so the redirect would rewrite source.
+    // Behaviour is covered in scripts/install-cli.test.ts; this guards the shape.
+    // Comments legitimately mention the pattern as a counter-example, so only
+    // executable lines are inspected.
+    const code = (await installer())
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .join("\n");
+    expect(code).not.toMatch(/>\s*"?\$BIN_PATH/);
+    expect(code).toContain("replace_link");
+    expect(code).toContain("node:fs");
+  });
+
+  test("swaps the current version by renaming a link, not by moving a directory", async () => {
+    // `mv src current` moves src *into* the directory current points at, on both
+    // BSD and GNU. rename(2) replaces the entry, which is what a switch needs.
+    const script = await installer();
+    expect(script).toContain("renameSync");
+    expect(script).not.toMatch(/mv -f "\$CURRENT\.new" "\$CURRENT"/);
+    expect(script).toContain('CURRENT="$ROOT/current"');
+  });
+
+  test("fails instead of writing an unknown commit", async () => {
+    const script = await installer();
+    expect(script).toContain("nothing was installed");
+    expect(script).toMatch(/cannot resolve .* to a commit/);
+  });
+
+  test("switches only after the staged tree passes its smoke checks", async () => {
+    const script = await installer();
+    // The last staged verification must precede the link swap. `|| true` on the
+    // rollback line and the report line both contain the call, so the checks are
+    // matched by their die-message instead.
+    const lastCheck = script.lastIndexOf('does not document');
+    // Not `indexOf`: the helper is defined near the top, so the first match is
+    // the definition, not the switch.
+    const switchLink = script.lastIndexOf('replace_link "$CURRENT.new" "$CURRENT"');
+    expect(lastCheck).toBeGreaterThan(-1);
+    expect(switchLink).toBeGreaterThan(lastCheck);
+  });
+
+  test("never rewrites the client config", async () => {
+    const script = await installer();
+    expect(script).not.toMatch(/>\s*"?\$HOME\/\.config\/x-sage/);
+    expect(script).not.toContain("config.toml <<");
+    expect(script).toContain("config kept as-is");
+  });
+
+  test("installs a self-contained CLI snapshot", async () => {
+    // `@x-sage/service` is a type-only import, so the client is a handful of
+    // source files. A value import would make the one-liner install a client
+    // that cannot resolve its dependency.
+    const cli = await read("apps/cli/src/index.ts");
+    expect(cli).toContain('import type { ApiMethod, ApiResponse } from "@x-sage/service"');
+    expect(cli).not.toMatch(/^import \{[^}]*\} from "@x-sage\//m);
+
+    // Every relative import must be in the download list, or the installed
+    // snapshot fails at import time.
+    const script = await installer();
+    const listed = script.slice(script.indexOf("CLI_FILES="), script.indexOf("\n", script.indexOf("CLI_FILES=")));
+    for (const file of ["index.ts", "config.ts", "build-info.ts"]) {
+      expect(listed).toContain(file);
+    }
+  });
+
+  test("README documents the installer it ships, including pinning and rollback", async () => {
+    const readme = await read("README.md");
+    expect(readme).toContain("scripts/install-cli.sh");
+    for (const variable of ["X_SAGE_REF", "X_SAGE_PREFIX", "X_SAGE_SKILLS_DIR"]) {
+      expect(readme).toContain(variable);
+    }
+    // A pin example must use a placeholder: a real-but-stale hash installs a
+    // commit that predates the files being documented.
+    expect(readme).toContain("<完整40位commit>");
+    expect(readme).not.toMatch(/X_SAGE_REF=[0-9a-f]{40}/);
+    // The production host is tailnet-only; a reader must not treat the failure
+    // as an outage.
+    expect(readme).toContain("tailnet");
+    // Rollback advice must match the link-based layout.
+    expect(readme).toContain("versions/");
+    // Reporting "installed" while an older PATH entry wins is how a machine ends
+    // up running a stale client that looks freshly installed.
+    expect(readme).toContain("command -v -a x-sage");
+    expect(await installer()).toContain("comes first on PATH");
+  });
+});

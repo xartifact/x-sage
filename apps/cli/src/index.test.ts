@@ -478,3 +478,56 @@ describe("body write-back", () => {
     }
   });
 });
+
+/**
+ * `--version` is a local command: no server, no config, no network.
+ *
+ * The point of these cases is that build identity must be answerable even when
+ * everything else is broken — that is precisely when a user asks "what am I
+ * even running?". A version probe that needs a reachable server would be
+ * useless in the situation it is most needed.
+ */
+describe("--version", () => {
+  test("prints a build triple without any server or config", async () => {
+    const result = await run(["--version"], { XDG_CONFIG_HOME: join(tmpdir(), "x-sage-no-cfg") });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("x-sage CLI");
+    expect(result.stdout).toContain("commit");
+    expect(result.stdout).toContain("ref");
+    expect(result.stderr).toBe("");
+  });
+
+  test("version is an alias for --version", async () => {
+    const viaFlag = await run(["--version"]);
+    const viaWord = await run(["version"]);
+    expect(viaWord.exitCode).toBe(0);
+    expect(viaWord.stdout).toBe(viaFlag.stdout);
+  });
+
+  test("works when the server is unreachable — it must not dial out", async () => {
+    // Port 9 (discard) is closed everywhere; if --version tried a request it
+    // would surface a connection error instead of the triple.
+    const result = await run(["--version", "--server", "http://127.0.0.1:9"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("commit");
+  });
+
+  test("reports the installed manifest identity when one is present", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "x-sage-manifest-"));
+    try {
+      const commit = "a".repeat(40);
+      await writeFile(
+        join(dir, "build-manifest.json"),
+        JSON.stringify({ version: "0.1.0", commit, ref: "v0.1.0" }),
+      );
+      const result = await run(["--version"], { X_SAGE_BUILD_MANIFEST: join(dir, "build-manifest.json") });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(commit);
+      expect(result.stdout).toContain("v0.1.0");
+      // A manifest is the trusted install case, so the source token is omitted.
+      expect(result.stdout).not.toContain("source manifest");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

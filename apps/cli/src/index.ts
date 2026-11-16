@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import type { ApiMethod, ApiResponse } from "@x-sage/service";
 import { configPath, resolveTarget } from "./config.ts";
+import { formatVersion, readCliBuildInfo } from "./build-info.ts";
 
 /**
  * x-sage CLI — a REST client.
@@ -412,6 +413,9 @@ Graph:
 
 Viz:
   viz stats | viz export <path>
+
+Meta:
+  --version | version                  Print CLI version + build commit (local, no server)
 `;
 }
 
@@ -473,6 +477,13 @@ async function main(): Promise<void> {
 
   const serverFlag = takeFlag("server");
   const tokenFlag = takeFlag("token");
+
+  // `--version` / `version` answer locally: no server, no config, no network.
+  // A version probe that needs configuration cannot diagnose a broken config.
+  if (allArgs[0] === "--version" || allArgs[0] === "version") {
+    process.stdout.write(`${formatVersion(readCliBuildInfo())}\n`);
+    process.exit(0);
+  }
 
   const command = allArgs[0];
   if (command === undefined) emitUsageError(usage());
