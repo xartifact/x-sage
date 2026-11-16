@@ -20,7 +20,11 @@ export async function generateGraph(kbPath: string): Promise<Graph> {
       continue; // layer directory doesn't exist yet
     }
 
-    for (const file of entries) {
+    // Sorted, not raw readdir order: readdir order is filesystem-dependent, so
+    // graph.json used to change ordering between machines for an identical KB.
+    // Sorted filenames make the file-backed order equal to the structured
+    // store's (layer, then id), so a cutover does not reorder any output.
+    for (const file of entries.sort()) {
       if (!file.endsWith(".md")) continue;
       const filePath = join(layerDir, file);
       const raw = await readFile(filePath, "utf-8");

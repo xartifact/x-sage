@@ -44,7 +44,12 @@ export async function proposeEdge(
   const edge = EdgeSchema.parse({ type: params.type, target, confidence: params.confidence });
 
   const date = new Date().toISOString().split("T")[0]!;
-  const filename = `${date}-${from}-${edge.type}-${edge.target}.md`;
+  // Timestamp plus a random suffix, like the atom path: the date alone meant two
+  // identical proposals on the same day returned 201 twice and the second
+  // silently overwrote the first, so the first review never happened.
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const suffix = randomBytes(3).toString("hex");
+  const filename = `${stamp}-${from}-${edge.type}-${edge.target}-${suffix}.md`;
   const edgesDir = join(proposalsDir, "edges");
   await mkdir(edgesDir, { recursive: true });
 

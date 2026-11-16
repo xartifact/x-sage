@@ -95,16 +95,32 @@ function serve(writeToken?: string, kbRoot: string = REAL_KB) {
  * per case keeps the suite parallel-safe and proves the client never touches
  * the filesystem.
  */
+/**
+ * Detect a response that did not come from this server.
+ *
+ * Some sandboxes intercept a child process's outbound HTTP and answer 401 with
+ * `{"error":{"code":"AUTH_REQUIRED"}}`. The dispatcher never emits that shape,
+ * so seeing it means the request never reached the app; retrying is safe and
+ * is the difference between a real regression and a network sandbox artifact.
+ */
+function isIntercepted(runResult: Run): boolean {
+  return runResult.stderr.includes("AUTH_REQUIRED") || runResult.stdout.includes("AUTH_REQUIRED");
+}
+
 async function againstServer(
   args: string[],
   options: { writeToken?: string; stdin?: string; kbRoot?: string } = {},
 ): Promise<Run> {
-  const server = serve(options.writeToken, options.kbRoot);
-  try {
-    const tokenArgs = options.writeToken === undefined ? [] : ["--token", options.writeToken];
-    return await run(["--server", server.url, ...tokenArgs, ...args], {}, options.stdin);
-  } finally {
-    server.stop();
+  const attempts = 3;
+  for (let attempt = 1; ; attempt++) {
+    const server = serve(options.writeToken, options.kbRoot);
+    try {
+      const tokenArgs = options.writeToken === undefined ? [] : ["--token", options.writeToken];
+      const result = await run(["--server", server.url, ...tokenArgs, ...args], {}, options.stdin);
+      if (attempt >= attempts || !isIntercepted(result)) return result;
+    } finally {
+      server.stop();
+    }
   }
 }
 
@@ -129,8 +145,8 @@ describe("read commands", () => {
     const withoutDerived = await againstServer(["edges", "decision", "--type", "depends-on", "--dir", "out"]);
     const withDerived = await againstServer(["edges", "decision", "--type", "depends-on", "--dir", "out", "--derived"]);
 
-    expect(withoutDerived.exitCode).toBe(0);
-    expect(withDerived.exitCode).toBe(0);
+    expect({ run: "withoutDerived", ...withoutDerived }).toMatchObject({ exitCode: 0, stderr: "" });
+    expect({ run: "withDerived", ...withDerived }).toMatchObject({ exitCode: 0, stderr: "" });
     expect(withoutDerived.stdout).not.toContain("value");
     expect(withDerived.stdout).toContain("value");
     expect(withDerived.stdout).toContain("(derived)");
@@ -396,7 +412,9 @@ describe("body write-back", () => {
   test("refine-body rejects a stale revision and accepts a current one", async () => {
     const kbRoot = await copyKb();
     try {
-      const live = JSON.parse((await againstServer(["concept", "body", "risk"], { kbRoot })).stdout);
+      const readback = await againstServer(["concept", "body", "risk"], { kbRoot });
+      expect({ code: readback.exitCode, err: readback.stderr }).toEqual({ code: 0, err: "" });
+      const live = JSON.parse(readback.stdout);
 
       const stale = await againstServer(
         ["refine-body", "risk", "--file", "-", "--expected-revision", "0".repeat(64), "--reason", "r"],
@@ -419,13 +437,15 @@ describe("body write-back", () => {
   test("refine-body reads stdin with --file -", async () => {
     const kbRoot = await copyKb();
     try {
-      const live = JSON.parse((await againstServer(["concept", "body", "risk"], { kbRoot })).stdout);
+      const readback = await againstServer(["concept", "body", "risk"], { kbRoot });
+      expect({ code: readback.exitCode, err: readback.stderr }).toEqual({ code: 0, err: "" });
+      const live = JSON.parse(readback.stdout);
       const candidate = "# 风险\n\n来自 stdin 的正文。\n";
-      const { stdout, exitCode } = await againstServer(
+      const { stdout, stderr, exitCode } = await againstServer(
         ["refine-body", "risk", "--file", "-", "--expected-revision", live.revision, "--reason", "stdin"],
         { kbRoot, stdin: candidate },
       );
-      expect(exitCode).toBe(0);
+      expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
 
       const file = stdout.match(/proposals\/bodies\/(\S+\.json)/)?.[1];
       expect(file).toBeDefined();
@@ -439,7 +459,9 @@ describe("body write-back", () => {
   test("proposals show prints a diff, then merge applies it", async () => {
     const kbRoot = await copyKb();
     try {
-      const live = JSON.parse((await againstServer(["concept", "body", "risk"], { kbRoot })).stdout);
+      const readback = await againstServer(["concept", "body", "risk"], { kbRoot });
+      expect({ code: readback.exitCode, err: readback.stderr }).toEqual({ code: 0, err: "" });
+      const live = JSON.parse(readback.stdout);
       const candidate = `${live.body}\n追加的一段。\n`;
       const created = await againstServer(
         ["refine-body", "risk", "--file", "-", "--expected-revision", live.revision, "--reason", "r"],
@@ -528,6 +550,185 @@ describe("--version", () => {
       expect(result.stdout).not.toContain("source manifest");
     } finally {
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * `knowledge` subcommands.
+ *
+ * The structured surface is the second authority, so these assert the same
+ * client contract: one REST request per invocation, server-rendered text, exit
+ * code from the status. A real fixture KB keeps the expected claims stable.
+ */
+describe("knowledge commands", () => {
+  const FIXTURE_KB = resolve(import.meta.dir, "../../../fixtures/architecture-review");
+
+  async function fixtureKb(): Promise<{ root: string; cleanup: () => Promise<void> }> {
+    const dir = await mkdtemp(join(tmpdir(), "x-sage-cli-knowledge-"));
+    await cp(FIXTURE_KB, dir, { recursive: true });
+    return { root: dir, cleanup: () => rm(dir, { recursive: true, force: true }) };
+  }
+
+  test("status reports Markdown authority before migration and structured after", async () => {
+    const kb = await fixtureKb();
+    try {
+      const before = await againstServer(["knowledge", "status"], { kbRoot: kb.root });
+      expect(before.exitCode).toBe(0);
+      expect(JSON.parse(before.stdout).authority).toBe("markdown");
+
+      const imported = await againstServer(["knowledge", "import"], { kbRoot: kb.root });
+      expect({ code: imported.exitCode, err: imported.stderr }).toEqual({ code: 0, err: "" });
+      expect(imported.stdout).toContain("6 created");
+
+      const after = await againstServer(["knowledge", "status"], { kbRoot: kb.root });
+      expect(JSON.parse(after.stdout).authority).toBe("structured");
+    } finally {
+      await kb.cleanup();
+    }
+  });
+
+  test("a second import fails with the reason, so a pipeline notices", async () => {
+    const kb = await fixtureKb();
+    try {
+      expect((await againstServer(["knowledge", "import"], { kbRoot: kb.root })).exitCode).toBe(0);
+      const again = await againstServer(["knowledge", "import"], { kbRoot: kb.root });
+      expect(again.exitCode).toBe(1);
+      expect(again.stderr).toContain("reimport");
+    } finally {
+      await kb.cleanup();
+    }
+  });
+
+  test("document prints Markdown, and --json carries the revision", async () => {
+    const kb = await fixtureKb();
+    try {
+      await againstServer(["knowledge", "import"], { kbRoot: kb.root });
+
+      const markdown = await againstServer(["knowledge", "document", "review-risk"], { kbRoot: kb.root });
+      expect({ code: markdown.exitCode, err: markdown.stderr }).toEqual({ code: 0, err: "" });
+      expect(markdown.stdout).toContain("id: review-risk");
+
+      const json = await againstServer(["knowledge", "document", "review-risk", "--json"], { kbRoot: kb.root });
+      expect({ code: json.exitCode, err: json.stderr }).toEqual({ code: 0, err: "" });
+      expect(JSON.parse(json.stdout).revision).toMatch(/^[a-f0-9]{64}$/);
+    } finally {
+      await kb.cleanup();
+    }
+  });
+
+  test("propose → proposals → review → claims, with the payload read from a file", async () => {
+    const kb = await fixtureKb();
+    const payloadDir = await mkdtemp(join(tmpdir(), "x-sage-cli-payload-"));
+    try {
+      await againstServer(["knowledge", "import"], { kbRoot: kb.root });
+      const doc = await againstServer(["knowledge", "document", "review-premise", "--json"], { kbRoot: kb.root });
+      const revision = JSON.parse(doc.stdout).conceptRevision as string;
+
+      const payloadFile = join(payloadDir, "claim.json");
+      await writeFile(
+        payloadFile,
+        JSON.stringify({ kind: "premise", text: "3 倍流量假设未经验证", confidence: "hypothetical" }),
+      );
+
+      const proposed = await againstServer(
+        [
+          "knowledge", "propose",
+          "--kind", "claim-create",
+          "--subject", "review-premise",
+          "--expected-revision", revision,
+          "--reason", "record the capacity assumption",
+          "--author", "external-agent",
+          "--payload", payloadFile,
+          "--json",
+        ],
+        { kbRoot: kb.root },
+      );
+      expect({ code: proposed.exitCode, stderr: proposed.stderr }).toEqual({ code: 0, stderr: "" });
+      const proposal = JSON.parse(proposed.stdout) as { id: string; status: string };
+      expect(proposal.status).toBe("pending");
+
+      const listed = await againstServer(["knowledge", "proposals", "--status", "pending"], { kbRoot: kb.root });
+      expect({ out: listed.stdout, err: listed.stderr }).toEqual({ out: expect.stringContaining(proposal.id), err: "" });
+
+      const reviewed = await againstServer(
+        ["knowledge", "review", proposal.id, "--decision", "approve", "--reviewer", "arch-reviewer"],
+        { kbRoot: kb.root },
+      );
+      expect({ code: reviewed.exitCode, stderr: reviewed.stderr }).toEqual({ code: 0, stderr: "" });
+      expect(reviewed.stdout).toContain("Approved");
+
+      const claims = await againstServer(["knowledge", "claims", "review-premise"], { kbRoot: kb.root });
+      expect({ out: claims.stdout, err: claims.stderr }).toEqual({
+        out: expect.stringContaining("3 倍流量假设未经验证"),
+        err: "",
+      });
+    } finally {
+      await kb.cleanup();
+      await rm(payloadDir, { recursive: true, force: true });
+    }
+  });
+
+  test("a stale revision exits 1 and names the conflict", async () => {
+    const kb = await fixtureKb();
+    const payloadDir = await mkdtemp(join(tmpdir(), "x-sage-cli-payload-"));
+    try {
+      await againstServer(["knowledge", "import"], { kbRoot: kb.root });
+      const payloadFile = join(payloadDir, "claim.json");
+      await writeFile(payloadFile, JSON.stringify({ kind: "premise", text: "x", confidence: "confirmed" }));
+
+      const result = await againstServer(
+        [
+          "knowledge", "propose",
+          "--kind", "claim-create",
+          "--subject", "review-premise",
+          "--expected-revision", "b".repeat(64),
+          "--reason", "stale",
+          "--author", "external-agent",
+          "--payload", payloadFile,
+        ],
+        { kbRoot: kb.root },
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("Re-read");
+    } finally {
+      await kb.cleanup();
+      await rm(payloadDir, { recursive: true, force: true });
+    }
+  });
+
+  test("search prints the match basis as JSON", async () => {
+    const kb = await fixtureKb();
+    try {
+      await againstServer(["knowledge", "import"], { kbRoot: kb.root });
+      const result = await againstServer(["knowledge", "search", "延迟"], { kbRoot: kb.root });
+      expect(result.exitCode).toBe(0);
+      const payload = JSON.parse(result.stdout) as { mode: string; results: Array<{ signals: unknown[] }> };
+      expect(payload.mode).toBe("lexical");
+      expect(payload.results[0]?.signals.length).toBeGreaterThan(0);
+    } finally {
+      await kb.cleanup();
+    }
+  });
+
+  test("asset uploads an image and refuses a non-image file", async () => {
+    const kb = await fixtureKb();
+    const pngPath = join(FIXTURE_KB, "assets", "latency-chart.png");
+    const textPath = join(tmpdir(), `x-sage-not-image-${process.pid}.txt`);
+    try {
+      await againstServer(["knowledge", "import"], { kbRoot: kb.root });
+
+      const uploaded = await againstServer(["knowledge", "asset", pngPath], { kbRoot: kb.root });
+      expect(uploaded.exitCode).toBe(0);
+      expect(JSON.parse(uploaded.stdout).mediaType).toBe("image/png");
+
+      await writeFile(textPath, "not an image");
+      const refused = await againstServer(["knowledge", "asset", textPath], { kbRoot: kb.root });
+      expect(refused.exitCode).toBe(1);
+      expect(refused.stderr).toContain("Unsupported");
+    } finally {
+      await kb.cleanup();
+      await rm(textPath, { force: true });
     }
   });
 });

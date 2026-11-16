@@ -147,8 +147,18 @@ x-sage --server http://127.0.0.1:3001 activate decision
 | `frontier list \| add` | 未决概念 |
 | `checkpoint create \| read \| save -` | 跨会话快照 |
 | `graph generate --manifest` | 由概念文件重建 `graph.json` 与 `MANIFEST.md` |
+| `knowledge status \| import` | 查看权威类型 / 显式迁移到结构化存储 |
+| `knowledge document <id>` | 导出可编辑 Markdown（含断言与证据块） |
+| `knowledge propose … \| proposals \| review` | 断言 / 证据 / 关系 / 文档写回的提案与审阅 |
+| `knowledge search "<text>" [--vector f]` | 词法 + 向量混合检索，返回匹配依据 |
+| `knowledge vectors <f> \| asset <img>` | 上传外部嵌入 / 图片证据 |
 
 写操作走提案：先写入 `proposals/`，审阅后再合并，期间用 `revision` 检测并发修改。
+
+**两种权威**：未导入时概念文件是唯一真源；执行 `knowledge import` 后 SQLite
+（`<kb>/knowledge.db`）是唯一真源，Markdown 降级为人工编辑与审阅格式。切换是显式的、
+可回滚的（删除数据库即回到文件权威），旧写路径在结构化权威下返回 409 并指出替代端点。
+详见 [docs/knowledge-store.md](docs/knowledge-store.md)。
 
 ## Skill
 
@@ -182,6 +192,8 @@ curl -fsSL "https://raw.githubusercontent.com/xartifact/x-sage/$COMMIT/skills/x-
 | [docs/deployment.md](docs/deployment.md) | 镜像、CI、x99 上线、故障排查 |
 | [docs/edge-semantics.md](docs/edge-semantics.md) | 边类型的关系代数 |
 | [docs/concept-layers.md](docs/concept-layers.md) | L0–L3 判定标准 |
+| [docs/knowledge-store.md](docs/knowledge-store.md) | 结构化权威：迁移、断言、证据、向量、审阅冲突 |
+| [docs/architecture-review-case.md](docs/architecture-review-case.md) | 架构审查固定案例与期望检索结果 |
 
 ## 验证
 

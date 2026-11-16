@@ -1,0 +1,7 @@
+{
+  "id": "architecture-review",
+  "name": "Architecture Review",
+  "description": "Fixed case for testing structured knowledge retrieval against a real review: premises, a contested constraint, text and image evidence, and externally supplied vectors.",
+  "domains": ["engineering", "architecture"],
+  "created": "2026-11-16"
+}

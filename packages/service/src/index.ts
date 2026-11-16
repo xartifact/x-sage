@@ -40,6 +40,18 @@ export { validateConcepts } from "./validate.ts";
 export type { ConceptValidationReport } from "./validate.ts";
 
 export { handleRequest, wantsText } from "./api.ts";
+export { handleKnowledgeRequest } from "./knowledge-api.ts";
+export { authorityOf, isStructured } from "./authority.ts";
+export {
+  activateFromStore,
+  edgesFromStore,
+  pathFromStore,
+  searchFromStore,
+  validateFromStore,
+  vizFromStore,
+  conceptMarkdown,
+} from "./structured.ts";
+export * as store from "./store/index.ts";
 export type { ApiMethod, ApiRequest, ApiResponse } from "./api.ts";
 
 export {

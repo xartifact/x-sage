@@ -5,8 +5,18 @@ description: 通过 x-sage REST 服务读写「AI-Native 概念知识库」：�
 
 # x-sage 概念知识库
 
-x-sage 是一个**概念知识库**：不是文档库，也不是向量检索。概念以 markdown 文件为唯一真源，
-工具在读取时计算传递闭包与对称边，所以「问一个概念和什么冲突」这类问题不需要你自己遍历。
+x-sage 是一个**概念知识库**：不是文档库，也不是向量检索。工具在读取时计算传递闭包与
+对称边，所以「问一个概念和什么冲突」这类问题不需要你自己遍历。
+
+权威记录有两种，先问清楚用的是哪一种：
+
+| 权威 | 判据 | 真源 | 写入方式 |
+|---|---|---|---|
+| Markdown | 未导入 | `concepts/*.md` | `propose-edge` / `refine-atom` / `refine-body` + `proposals merge` |
+| 结构化 | `GET /api/knowledge/status` → `authority: "structured"` | `knowledge.db` | `knowledge propose` + `knowledge review` |
+
+结构化权威下旧写路径返回 **409**。断言、证据、外部向量只在结构化权威下存在，
+见 `docs/knowledge-store.md`。
 
 **架构是标准 C/S**：所有客户端（含 `x-sage` CLI）都是 REST 客户端。服务端是唯一读得到
 知识库的组件，客户机没有任何 KB 文件。因此**必须先有一个可达的服务端**。
@@ -244,6 +254,67 @@ x-sage concept body <id> --format markdown      # 读回，应与候选逐字节
 `confidence` 三档：`confirmed`（可作推理基础）、`hypothetical`（可探索，不可当公理）、
 `contested`（存在对立观点，需辩证处理）。**不要把自己的推测标成 confirmed。**
 
+## 结构化权威：断言、证据、混合检索
+
+`GET /api/knowledge/status` 的 `authority` 是 `structured` 时使用这一节。
+
+### 读
+
+```bash
+x-sage knowledge status                       # 权威 + 计数
+x-sage knowledge document <id>                # 可编辑 Markdown（含 claims 块）
+x-sage knowledge document <id> --json         # 带 revision / conceptRevision
+x-sage knowledge claims <id>                  # accepted 断言 + 其证据
+x-sage knowledge evidence <id> | claim:<clm_…>
+x-sage knowledge search "延迟 约束" --limit 5   # 词法 + 可选向量，返回匹配依据
+```
+
+`activate` / `edges` / `graph` / `viz` / `manifest` 在结构化权威下读同一份数据，
+返回结构不变。
+
+### 写：提案 + 审阅
+
+```bash
+# 1. 取基线。kind 与 subject 决定基线，别自己算。
+curl -s "$S/api/knowledge/revisions?kind=claim-create&subject=review-premise" | jq -r .expectedRevision
+
+# 2. 提交
+x-sage knowledge propose --kind claim-create --subject review-premise   --expected-revision <rev> --reason "为什么" --author <你的标识>   --payload claim.json
+
+# 3. 人类审阅（不要自己批准自己的提案）
+x-sage knowledge proposals --status pending
+x-sage knowledge review prp_… --decision approve --reviewer <审阅者>
+```
+
+| kind | 基线含义 |
+|---|---|
+| `claim-create` | 概念审阅基线（记录 + accepted 断言） |
+| `claim-edit` | 该断言的版本 |
+| `evidence-attach` | 概念审阅基线 |
+| `relation-assert` | 该概念的关系集合版本 |
+| `concept-markdown` | 导出文档的字节哈希（`document.revision`） |
+
+- 基线不符 → 409，什么都不写；审阅时基线变了 → 提案转 `conflicted`，可重新提交。
+- `document` 返回的 `revision` 是**文档**基线（写回用），`conceptRevision` 是概念
+  审阅基线（断言/证据用）。别把两个字符串互换。
+- 断言文本可含换行与 `::`，投影会转义换行，不会丢内容。
+- 证据：图片先 `knowledge asset <file>` 拿内容地址，再提交 `evidence-attach`；
+  只接受 PNG/JPEG/WebP/GIF，媒体类型按字节判定。
+- 跨库目标（`otherkb::concept`）在结构化权威下被拒绝：一库一数据库。
+
+### 外部向量
+
+嵌入由你在本地算，服务端只校验与存储：
+
+```bash
+# 被嵌入的文本由服务端约定：concept = atom + 空行 + body
+x-sage knowledge vectors vectors.json    # [{ subjectType, subjectId, model, revision, values }]
+```
+
+`revision` 必须是被嵌入文本的 sha256（文本拼法见 `docs/knowledge-store.md`）。
+不符 → 409：这说明你的嵌入管道已经过期，重新嵌入而不是让服务端静默忽略。
+**不要把随机或占位向量当真实语义检索**——它只会污染结果并把 `cosine` 变成噪声。
+
 ## 校验与产物重建
 
 ```bash
@@ -254,6 +325,10 @@ x-sage manifest --write      # 概念文件 → MANIFEST.md
 
 `graph.json` 和 `MANIFEST.md` 都是生成物。提交前跑 `validate --graph`，它会在产物落后于
 概念文件时报 `stale-graph`。
+
+**结构化权威下两者都不是文件**：`GET /api/manifest` 与 `GET /api/graph` 从数据库生成，
+`PUT` 返回 409。导入时磁盘上的这两个文件已被替换成指向 `archive/markdown-<ts>/` 的说明，
+所以用编辑器打开不会看到「看起来像最新」的旧内容。
 
 ## 会话快照
 
@@ -269,6 +344,8 @@ x-sage checkpoint save - < cp.json      # 从 stdin 写完整快照
 
 ## 禁止事项
 
+0. **不要绕过审阅** —— 结构化权威下所有写入都是提案；不要自己批准自己的提案，也不要把
+   `hypothetical` 的断言说成结论。
 1. **不要用 `frontier` 记录「概念内张力」或「L2→L3 展开方向」** —— `frontier add` 只向
    「未决概念」表插入一行，不碰另两节；这两节仍只能直接编辑文件。不要用 `add` 去表达张力。
 2. **不要把 hypothetical 当 confirmed 用** —— 未验证的关联不可作为推理基础。
@@ -294,5 +371,13 @@ CLI 只是薄传输层，等价调用：
 | `proposals show <file>` | `GET /api/proposals/<file>` |
 | `graph generate` | `PUT /api/graph` |
 | `manifest --write` | `PUT /api/manifest` |
+| `knowledge status` | `GET /api/knowledge/status` |
+| `knowledge import` | `POST /api/knowledge/import` |
+| `knowledge document <id>` | `GET /api/knowledge/concepts/<id>/document` |
+| `knowledge propose …` | `POST /api/knowledge/proposals` |
+| `knowledge review <id>` | `POST /api/knowledge/proposals/<id>/review` |
+| `knowledge search` | `POST /api/knowledge/search` |
+| `knowledge vectors <f>` | `POST /api/knowledge/vectors` |
+| `knowledge asset <f>` | `POST /api/knowledge/assets` |
 
 `format` 可协商：`json`（默认）、`text`（AI 文本）、`markdown`（原文）、`manifest`（表格）。

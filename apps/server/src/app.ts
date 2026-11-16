@@ -47,13 +47,23 @@ export function createApp(options: AppOptions) {
 
   // Writes are unbounded without this: a 50 MB proposal body would be parsed
   // into memory before any validation runs.
+  //
+  // The knowledge surface gets its own, larger cap because image evidence is
+  // base64 inside a JSON envelope; the strict cap below would make every asset
+  // above ~190 KiB unreachable. Both limits are hard, and both are checked
+  // before the body is parsed.
+  const limitBody = (maxSize: number) =>
+    bodyLimit({
+      maxSize,
+      onError: (c) => c.json({ error: "Request body too large" }, 413),
+    });
+  // Hono runs every matching middleware, so the two limits cannot simply be
+  // registered in order: the general one must skip the prefix that has its own.
   app.use(
     "/api/*",
-    bodyLimit({
-      maxSize: 256 * 1024,
-      onError: (c) => c.json({ error: "Request body too large" }, 413),
-    }),
+    async (c, next) => (new URL(c.req.url).pathname.startsWith("/api/knowledge/") ? next() : limitBody(256 * 1024)(c, next)),
   );
+  app.use("/api/knowledge/*", limitBody(12 * 1024 * 1024));
 
   if (options.writeToken !== undefined) {
     const token = options.writeToken;
@@ -96,7 +106,17 @@ export function createApp(options: AppOptions) {
     let body: unknown;
     if (isWrite(c.req.method)) {
       // A body is optional for endpoints whose arguments are all in the path.
-      body = await c.req.json().catch(() => undefined);
+      // A body that is present but malformed is NOT absent: dropping it let a
+      // truncated payload fall through to defaults (an omitted `file` means
+      // "merge everything").
+      const raw = await c.req.text();
+      if (raw.trim() !== "") {
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          return c.json({ error: "Request body is not valid JSON" }, 400);
+        }
+      }
     }
 
     const query: Record<string, string | undefined> = {};
@@ -112,9 +132,14 @@ export function createApp(options: AppOptions) {
     };
 
     const response = await handleRequest(ctx, request, c.req.header("accept"));
-    return new Response(response.body, {
+    const payload = response.bytes ?? response.body;
+    return new Response(payload, {
       status: response.status,
-      headers: { "content-type": response.contentType },
+      headers: {
+        "content-type": response.contentType,
+        // Evidence images are immutable: the URL is their content hash.
+        ...(response.bytes === undefined ? {} : { "cache-control": "private, max-age=31536000, immutable" }),
+      },
     });
   });
 

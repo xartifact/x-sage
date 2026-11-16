@@ -19,7 +19,9 @@ export async function generateManifest(kbPath: string): Promise<ManifestRow[]> {
       continue; // layer directory doesn't exist yet
     }
 
-    for (const file of entries) {
+    // Same reasoning as graph generation: a stable order makes MANIFEST.md
+    // reproducible across filesystems and equal to the store's projection.
+    for (const file of entries.sort()) {
       if (!file.endsWith(".md")) continue;
       const filePath = join(layerDir, file);
       const raw = await readFile(filePath, "utf-8");

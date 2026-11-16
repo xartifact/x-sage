@@ -53,6 +53,14 @@ x-sage --server http://127.0.0.1:3001 validate --graph
 
 ## 知识库结构
 
+The authoritative store switches after an explicit import initializes
+`<kb>/knowledge.db` and records `meta.imported_at`; see `docs/knowledge-store.md`.
+
+- **Markdown authority** (default, before import): `concepts/*.md` is the source of truth.
+- **Structured authority** (after import): SQLite is the source of truth. Markdown
+  is an editing and review projection (export, edit, submit with a revision baseline).
+  Legacy write routes return 409 and identify their replacement endpoints.
+
 每个知识库位于 `kb/<kb-id>/`，包含：
 
 ```
@@ -94,7 +102,7 @@ triggers: [关键词A, 关键词B]
 edges:
   - type: is-a | part-of | depends-on | enables | contradicts | instantiates | analogous-to
     target: concept-id           # 本 KB 内引用
-    # target: kb-id::concept-id # 跨 KB 引用
+    # target: kb-id::concept-id # Reserved syntax; rejected by the per-KB structured store.
     confidence: confirmed
 ---
 
@@ -215,5 +223,9 @@ AI 可执行的写回操作：
 
 ## 多知识库
 
-所有 KB 在 `registry.json` 中注册。跨 KB 引用格式：`kb-id::concept-id`。
+All KBs are registered in `registry.json`. The cross-KB reference syntax is
+`kb-id::concept-id`, but the structured store does not support cross-KB targets.
+Each KB has its own `knowledge.db`; imports, `relation-assert`, and `evidence-attach`
+explicitly reject cross-KB references instead of persisting unresolved edges.
+See `docs/knowledge-store.md`.
 新建 KB：在 `kb/` 下创建目录 + `kb.json`，然后在 `registry.json` 注册。

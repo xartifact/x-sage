@@ -11,3 +11,13 @@ dist/
 # KB 写锁（运行期临时文件，不是内容）
 *.write.lock
 kb/**/.write.lock
+
+# 结构化权威：数据库、WAL、内容寻址资产、导入快照都是运行期状态，不是源码
+kb/**/knowledge.db
+kb/**/knowledge.db-wal
+kb/**/knowledge.db-shm
+kb/**/assets/
+kb/**/archive/
+fixtures/**/knowledge.db
+fixtures/**/knowledge.db-wal
+fixtures/**/knowledge.db-shm

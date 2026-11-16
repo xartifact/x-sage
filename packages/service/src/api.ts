@@ -1,3 +1,4 @@
+import type { Database } from "bun:sqlite";
 import { ConceptIdSchema } from '@x-sage/core/types';
 import { catalog, CatalogUnavailableError } from './catalog.ts';
 import { mkdir, writeFile, link, unlink } from 'node:fs/promises';
@@ -26,6 +27,27 @@ import {
   type BodyProposal,
 } from "@x-sage/core/proposals";
 import { proposalsDir, type KbContext } from "./kb.ts";
+import { ApiError, json, text, MARKDOWN_TYPE, type ApiResponse } from "./http.ts";
+import { handleKnowledgeRequest } from "./knowledge-api.ts";
+import { MarkdownAuthorityError, authorityOf, refuseMarkdownWrite } from "./authority.ts";
+import { openStore } from "./store/schema.ts";
+import {
+  activateFromStore,
+  edgesFromStore,
+  pathFromStore,
+  searchFromStore,
+  validateFromStore,
+  vizFromStore,
+  conceptMarkdown,
+  manifestFromStoreDb,
+} from "./structured.ts";
+import {
+  buildGraphFromStore,
+  conceptDocument,
+  conceptFromStore,
+  getProposal as getKnowledgeProposal,
+  listKnowledgeProposals,
+} from "./store/index.ts";
 import {
   activate,
   appendFrontier,
@@ -90,35 +112,7 @@ export interface ApiRequest {
   body?: unknown;
 }
 
-export interface ApiResponse {
-  status: number;
-  contentType: string;
-  body: string;
-}
-
-const JSON_TYPE = "application/json; charset=utf-8";
-const TEXT_TYPE = "text/plain; charset=utf-8";
-const MARKDOWN_TYPE = "text/markdown; charset=utf-8";
-
-/** A failure that carries the HTTP status it should become. */
-class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
-function json(status: number, value: unknown): ApiResponse {
-  // Trailing newline keeps CLI stdout uniform: the same body serves a terminal
-  // (which reads better ending on its own line) and an HTTP client.
-  return { status, contentType: JSON_TYPE, body: JSON.stringify(value) + "\n" };
-}
-
-function text(status: number, body: string, contentType = TEXT_TYPE): ApiResponse {
-  return { status, contentType, body };
-}
+export type { ApiResponse } from "./http.ts";
 
 /** Parse a positive integer query parameter, or undefined when absent. */
 function intParam(query: ApiRequest["query"], name: string): number | undefined {
@@ -185,6 +179,21 @@ function optionalField(body: Record<string, unknown>, field: string): string | u
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
+/**
+ * Run one read against the structured store.
+ *
+ * The connection is opened and closed per request: a shared connection would
+ * hold a deleted database file alive after a rollback to Markdown authority.
+ */
+function readStructured<T>(ctx: KbContext, fn: (db: Database) => T): T {
+  const db = openStore(ctx.root);
+  try {
+    return fn(db);
+  } finally {
+    db.close();
+  }
+}
+
 
 
 /**
@@ -206,7 +215,20 @@ export async function handleRequest(
     if (path === '/knowledge-bases' && method === 'GET') return json(200, { knowledgeBases: entries.map(({id,name,root}) => ({id,name,isDefault:root === ctx.root})) });
     const selected = query.kb === undefined ? undefined : entries.find(entry => entry.id === query.kb);
     if (query.kb !== undefined && !selected) throw new ApiError(404, 'Unknown knowledge base');
-    return await route(selected ? {root:selected.root} : ctx, method, path, query, request, format);
+    const scoped = selected ? { root: selected.root } : ctx;
+    // The structured surface lives outside the KB query parameter: a proposal
+    // names its KB by the server it was submitted to, and mixing the two
+    // selectors would let one request write to one KB and read from another.
+    if (path === "/knowledge" || path.startsWith("/knowledge/")) {
+      return await handleKnowledgeRequest(scoped, {
+        method,
+        path: path.slice("/knowledge".length) || "/",
+        query,
+        ...(request.body === undefined ? {} : { body: request.body }),
+        format,
+      });
+    }
+    return await route(scoped, method, path, query, request, format);
   } catch (err) {
     // Status is chosen from the error type first. The old fallback matched on
     // the word "not found" in the message, which meant a conflict or a bad
@@ -217,6 +239,8 @@ export async function handleRequest(
         ? 503
         : err instanceof ApiError
         ? err.status
+        : err instanceof MarkdownAuthorityError
+          ? 409
         : err instanceof ProposalTargetNotFoundError
           ? 404
           : err instanceof ProposalConflictError
@@ -252,6 +276,7 @@ async function route(
   format: Format,
 ): Promise<ApiResponse> {
   if (path === '/concepts' && method === 'POST') {
+    if (authorityOf(ctx) === "structured") refuseMarkdownWrite("POST /api/concepts");
     const body = requireBody(request);
     const parsed = ConceptFrontmatterSchema.safeParse(body.frontmatter);
     if (!parsed.success || !ConceptIdSchema.safeParse(parsed.data?.id).success) throw new ApiError(400, 'Invalid concept metadata or id');
@@ -291,13 +316,20 @@ async function route(
   }
 
   if (path === "/meta" && method === "GET") {
+    if (authorityOf(ctx) === "structured") {
+      const graph = readStructured(ctx, (db) => buildGraphFromStore(db));
+      return json(200, { kb: ctx.root, authority: "structured", nodes: graph.nodes.length, edges: graph.edges.length });
+    }
     const graph = await buildGraph(ctx);
-    return json(200, { kb: ctx.root, nodes: graph.nodes.length, edges: graph.edges.length });
+    return json(200, { kb: ctx.root, authority: "markdown", nodes: graph.nodes.length, edges: graph.edges.length });
   }
 
   // ---- manifest (the AI's opening move) ----
   if (path === "/manifest" && method === "GET") {
-    const markdown = await renderManifest(ctx);
+    const markdown =
+      authorityOf(ctx) === "structured"
+        ? formatManifest(readStructured(ctx, (db) => manifestFromStoreDb(db)))
+        : await renderManifest(ctx);
     // `markdown` ends with a newline; one more matches the old `console.log`.
     return format === "json" ? json(200, { markdown }) : text(200, `${markdown}\n`, MARKDOWN_TYPE);
   }
@@ -305,6 +337,13 @@ async function route(
   // Regenerating MANIFEST.md is idempotent: the same KB always yields the same
   // file. PUT states that; a POST verb-in-path would not.
   if (path === "/manifest" && method === "PUT") {
+    if (authorityOf(ctx) === "structured") {
+      throw new ApiError(
+        409,
+        "MANIFEST.md is derived from the structured store and no longer needs regenerating. " +
+          "Read it with GET /api/manifest; the file is a projection, not an input.",
+      );
+    }
     const result = await writeManifest(ctx);
     if (format === "text") {
       return text(200, `MANIFEST.md written (${result.count} concepts).\n`);
@@ -314,19 +353,31 @@ async function route(
 
   // ---- visualiser payload ----
   if (path === "/viz" && method === "GET") {
-    const payload = await buildVizPayload(ctx);
+    const payload =
+      authorityOf(ctx) === "structured"
+        ? readStructured(ctx, (db) => vizFromStore(db))
+        : await buildVizPayload(ctx);
     return format === "text" ? text(200, renderVizStats(payload)) : json(200, payload);
   }
 
   // ---- graph ----
   if (path === "/graph" && method === "GET") {
-    const graph = await buildGraph(ctx);
+    const graph =
+      authorityOf(ctx) === "structured"
+        ? readStructured(ctx, (db) => buildGraphFromStore(db))
+        : await buildGraph(ctx);
     return json(200, boolParam(query, "semantic") ? semanticGraph(graph) : graph);
   }
 
   // Rebuilding graph.json from the concept files is idempotent, so it is a PUT
   // on the graph resource rather than a verb path.
   if (path === "/graph" && method === "PUT") {
+    if (authorityOf(ctx) === "structured") {
+      throw new ApiError(
+        409,
+        "graph.json is derived from the structured store; there is no file to rebuild. Use GET /api/graph.",
+      );
+    }
     const body = request.body === undefined ? {} : requireBody(request);
     const graph = await writeGraph(ctx);
     const manifest = body.manifest === true ? await writeManifest(ctx) : null;
@@ -348,7 +399,10 @@ async function route(
     if (keyword === undefined || keyword === "") {
       throw new ApiError(400, "Missing query parameter: q");
     }
-    const results = await search(ctx, keyword);
+    const results =
+      authorityOf(ctx) === "structured"
+        ? readStructured(ctx, (db) => searchFromStore(db, keyword))
+        : await search(ctx, keyword);
     if (format === "manifest") return text(200, `${formatManifest(results)}\n`, MARKDOWN_TYPE);
     if (format === "text") return text(200, renderSearchResults(keyword, results));
     return json(200, { keyword, results });
@@ -361,13 +415,19 @@ async function route(
     if (from === undefined || to === undefined) {
       throw new ApiError(400, "Missing query parameters: from, to");
     }
-    const result = await findPath(ctx, from, to);
+    const result =
+      authorityOf(ctx) === "structured"
+        ? readStructured(ctx, (db) => pathFromStore(db, from, to))
+        : await findPath(ctx, from, to);
     return format === "text" ? text(200, renderPath(result)) : json(200, result);
   }
 
   // ---- validation ----
   if (path === "/validate" && method === "GET") {
-    const report = await validateConcepts(ctx, { graph: boolParam(query, "graph") });
+    const report =
+      authorityOf(ctx) === "structured"
+        ? readStructured(ctx, (db) => validateFromStore(db))
+        : await validateConcepts(ctx, { graph: boolParam(query, "graph") });
     const status = report.valid ? 200 : 422;
 
     // `format=graph` is `graph validate`: only the integrity half, no file list.
@@ -386,6 +446,25 @@ async function route(
   if (bodyMatch !== null) {
     const conceptId = decodeURIComponent(bodyMatch[1]!);
     if (method === "GET") {
+      if (authorityOf(ctx) === "structured") {
+        const document = readStructured(ctx, (db) => conceptDocument(db, conceptId));
+        if (document === null) throw new ApiError(404, `Concept not found: ${conceptId}`);
+        // `body` keeps its documented meaning: everything after the
+        // frontmatter. The whole editable document is a separate field, so a
+        // consumer that diffs bodies does not suddenly see metadata.
+        const bodyOnly = document.document.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
+        const conceptAtom = readStructured(ctx, (db) => conceptFromStore(db, conceptId)?.atom) ?? "";
+        if (format === "markdown" || format === "text") return text(200, bodyOnly, MARKDOWN_TYPE);
+        return json(200, {
+          conceptId,
+          body: bodyOnly,
+          document: document.document,
+          revision: document.revision,
+          atom: conceptAtom,
+          structured: true,
+          note: "Structured authority: submit an edit as a concept-markdown proposal against `revision`",
+        });
+      }
       const result = await readBody(ctx, conceptId);
       // `--format markdown` is the body alone: a reviewer diffing a candidate
       // against the live file wants prose, not a frontmatter block they were
@@ -446,16 +525,64 @@ async function route(
   const proposalMatch = /^\/proposals\/([^/]+)$/.exec(path);
   if (proposalMatch !== null && method === "GET") {
     const file = decodeURIComponent(proposalMatch[1]!);
+    // Structured proposals have their own ids; serve them here too so a client
+    // that got an id from the list can fetch it from the same prefix.
+    if (authorityOf(ctx) === "structured" && file.startsWith("prp_")) {
+      const proposal = readStructured(ctx, (db) => getKnowledgeProposal(db, file));
+      if (proposal === null) throw new ApiError(404, `Proposal not found: ${file}`);
+      return format === "text"
+        ? text(
+            200,
+            [
+              `Proposal: ${proposal.id}`,
+              `Kind:     ${proposal.kind}`,
+              `Subject:  ${proposal.subject}`,
+              `Status:   ${proposal.status}`,
+              `Author:   ${proposal.author}`,
+              `Reason:   ${proposal.reason}`,
+              "",
+            ].join("\n"),
+          )
+        : json(200, proposal);
+    }
     return proposalDetail(ctx, file, format);
   }
 
   // ---- proposals ----
   if (path === "/proposals" && method === "GET") {
+    if (authorityOf(ctx) === "structured") {
+      const pending = readStructured(ctx, (db) => listKnowledgeProposals(db));
+      if (format === "text") {
+        return text(
+          200,
+          pending.length === 0
+            ? "No pending proposals.\n"
+            : `${pending
+                .map(
+                  (proposal: { status: string; kind: string; subject: string; id: string }) =>
+                    `${proposal.status.padEnd(10)} ${proposal.kind.padEnd(18)} ${proposal.subject}  [${proposal.id}]`,
+                )
+                .join("\n")}\n`,
+        );
+      }
+      // The legacy keys stay, empty: an existing client spreads
+      // `edges`/`atoms`/`bodies` and would throw on their absence.
+      return json(200, {
+        authority: "structured",
+        proposals: pending,
+        edges: [],
+        atoms: [],
+        bodies: [],
+      });
+    }
     const lists = await listProposals(ctx);
     return format === "text" ? text(200, renderProposals(lists)) : json(200, lists);
   }
 
   if (path === "/proposals/merge" && method === "POST") {
+    if (authorityOf(ctx) === "structured") {
+      refuseMarkdownWrite("POST /api/proposals/merge");
+    }
     const body = request.body === undefined ? {} : requireBody(request);
     const outcome = await mergeProposals(ctx, optionalField(body, "file") ?? "all");
     const rendered = renderMergeOutcome(outcome);
@@ -471,6 +598,7 @@ async function route(
   // One collection, two kinds. The kind travels in the body as `kind`, so the
   // path names a resource instead of an action.
   if (path === "/proposals" && method === "POST") {
+    if (authorityOf(ctx) === "structured") refuseMarkdownWrite("POST /api/proposals");
     const body = requireBody(request);
     const kind = optionalField(body, "kind") ?? "edge";
 
@@ -555,14 +683,25 @@ async function conceptActivation(
     throw new ApiError(400, `Invalid depth: ${depth}`);
   }
 
-  const result = await activate(ctx, conceptId, {
-    ...(strategy === undefined ? {} : { strategy }),
-    ...(depth === undefined ? {} : { depth }),
-  });
+  // Session start must read the authority. Without this branch the two
+  // endpoints an AI calls first kept serving the pre-import files while every
+  // other read served reviewed rows — a double truth in the worst place.
+  const structured = authorityOf(ctx) === "structured";
+  const result = structured
+    ? readStructured(ctx, (db) =>
+        activateFromStore(db, conceptId, {
+          ...(strategy === undefined ? {} : { strategy }),
+          ...(depth === undefined ? {} : { depth }),
+        }),
+      )
+    : await activate(ctx, conceptId, {
+        ...(strategy === undefined ? {} : { strategy }),
+        ...(depth === undefined ? {} : { depth }),
+      });
 
   if (format === "markdown") {
-    // `raw` is the file body, already newline-terminated. The old CLI printed it
-    // with console.log, which added one more; consumers' diffing depends on it.
+    // `raw` is the concept file, already newline-terminated. The old CLI printed
+    // it with console.log, which added one more; consumers' diffing depends on it.
     return text(200, `${result.raw}\n`, MARKDOWN_TYPE);
   }
   if (format === "text") return text(200, renderActivation(result));
@@ -578,10 +717,11 @@ async function conceptEdges(
   query: ApiRequest["query"],
   format: Format,
 ): Promise<ApiResponse> {
-  const direction = query.dir ?? "both";
-  if (direction !== "in" && direction !== "out" && direction !== "both") {
-    throw new ApiError(400, `Invalid dir: ${direction}. Must be in, out or both`);
+  const directionRaw = query.dir ?? "both";
+  if (directionRaw !== "in" && directionRaw !== "out" && directionRaw !== "both") {
+    throw new ApiError(400, `Invalid dir: ${directionRaw}. Must be in, out or both`);
   }
+  const direction: "in" | "out" | "both" = directionRaw;
 
   let type: EdgeType | undefined;
   const typeRaw = query.type;
@@ -593,23 +733,26 @@ async function conceptEdges(
     type = parsed.data as EdgeType;
   }
 
-  const graph = await buildGraph(ctx);
-  if (!graph.nodes.some((node) => node.id === conceptId)) {
-    throw new ApiError(404, `Concept not found: ${conceptId}`);
-  }
-
   // Symmetric completion always applies so one asserted tension is visible from
   // both ends; closure is opt-in because it is inference, not authorship.
   // Starting from the semantic graph would keep closure edges even when they
   // were not asked for, so the two views are built from their own base.
   const derived = boolParam(query, "derived");
-  const view = derived
-    ? semanticGraph(graph)
-    : { nodes: graph.nodes, edges: completeSymmetricEdges(graph).edges };
-  const hits = queryEdges(view, conceptId, {
-    ...(type === undefined ? {} : { type }),
-    direction,
-  });
+  const edgeQuery = { ...(type === undefined ? {} : { type }), direction };
+
+  const hits =
+    authorityOf(ctx) === "structured"
+      ? readStructured(ctx, (db) => edgesFromStore(db, conceptId, { ...edgeQuery, derived }))
+      : await (async () => {
+          const graph = await buildGraph(ctx);
+          if (!graph.nodes.some((node) => node.id === conceptId)) {
+            throw new ApiError(404, `Concept not found: ${conceptId}`);
+          }
+          const view = derived
+            ? semanticGraph(graph)
+            : { nodes: graph.nodes, edges: completeSymmetricEdges(graph).edges };
+          return queryEdges(view, conceptId, edgeQuery);
+        })();
 
   return format === "text"
     ? text(200, renderEdges(conceptId, hits))
