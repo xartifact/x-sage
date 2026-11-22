@@ -1,4 +1,6 @@
 import { join } from "node:path";
+import { lstat } from "node:fs/promises";
+import { ApiError } from "./http.ts";
 
 /** Layer directory names in presentation order, most abstract first. */
 export const LAYERS = ["L0-axioms", "L1-core", "L2-support", "L3-instances"] as const;
@@ -19,6 +21,19 @@ export interface KbContext {
 
 export function kb(root: string): KbContext {
   return { root };
+}
+
+/** Refuse to serve Markdown that may predate a retired SQLite authority. */
+export async function requireMarkdownSource(ctx: KbContext): Promise<void> {
+  for (const name of ["knowledge.db", "knowledge.db-wal", "knowledge.db-shm"]) {
+    try {
+      await lstat(join(ctx.root, name));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw new ApiError(503, "Could not verify the Markdown source");
+    }
+    throw new ApiError(503, "A legacy SQLite database is present. Migrate it offline before serving this knowledge base.");
+  }
 }
 
 export function conceptsDir(ctx: KbContext): string {

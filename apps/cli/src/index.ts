@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { writeSync } from "node:fs";
+import { existsSync, writeSync } from "node:fs";
+import { resolve } from "node:path";
 import type { ApiMethod, ApiResponse } from "@x-sage/service";
 import { configPath, resolveTarget } from "./config.ts";
 import { formatVersion, readCliBuildInfo } from "./build-info.ts";
@@ -8,7 +9,7 @@ import { formatVersion, readCliBuildInfo } from "./build-info.ts";
  * x-sage CLI — a REST client.
  *
  * The server is the only component that reads the knowledge base. This file
- * translates argv into one HTTP request and writes the
+ * translates argv into an HTTP request and writes the
  * response body to stdout; text is rendered server-side, so the client needs
  * no graph, no schema and no kb files.
  *
@@ -31,9 +32,9 @@ import { formatVersion, readCliBuildInfo } from "./build-info.ts";
  * synchronously to the file descriptor leaves nothing buffered to lose, and
  * `process.exitCode` lets node flush naturally when the fd is a pipe.
  */
-function writeAll(stream: "out" | "err", text: string): void {
+function writeAll(stream: "out" | "err", text: string | ArrayBuffer): void {
   const fd = stream === "out" ? 1 : 2;
-  const buffer = Buffer.from(text, "utf8");
+  const buffer = typeof text === "string" ? Buffer.from(text, "utf8") : Buffer.from(text);
   let offset = 0;
   while (offset < buffer.length) {
     try {
@@ -66,19 +67,6 @@ function emitJsonError(message: string): never {
 function emitUsageError(message: string): never {
   writeAll("out", `${message}\n`);
   process.exit(1);
-}
-
-/**
- * Content type from magic bytes, so `knowledge asset` sends what the file is
- * rather than what its extension claims. The server re-checks both anyway.
- */
-function sniffMediaType(bytes: Uint8Array): string | undefined {
-  const starts = (...signature: number[]): boolean => signature.every((byte, index) => bytes[index] === byte);
-  if (starts(0x89, 0x50, 0x4e, 0x47)) return "image/png";
-  if (starts(0xff, 0xd8, 0xff)) return "image/jpeg";
-  if (starts(0x47, 0x49, 0x46, 0x38)) return "image/gif";
-  if (starts(0x52, 0x49, 0x46, 0x46)) return "image/webp";
-  return undefined;
 }
 
 /** Split argv into `--flag value`, bare `--flag`, and positionals. */
@@ -117,6 +105,13 @@ function requirePositional(value: string | undefined, usage: string): string {
 const nativeService = "/sage.v1.SageCommandService/";
 const nativeMethods = {
   handshake: "Handshake",
+  "read-term-text": "ReadTermText",
+  "read-term-document": "ReadTermDocument",
+  "read-term-activation": "ReadTermActivation",
+  "read-graph-snapshot": "ReadGraphSnapshot",
+  "read-proposal-files": "ReadProposalFiles",
+  "submit-large-body": "SubmitLargeBodyProposal",
+  "commit-direct-concept": "CommitDirectConcept",
   submit: "SubmitProposal",
   review: "ReviewProposal",
   commit: "CommitCommand",
@@ -130,6 +125,12 @@ interface Invocation {
   body?: unknown;
   nativeMethod?: keyof typeof nativeMethods;
   requestFile?: string;
+  jsonFile?: string;
+  exportPath?: string;
+  absolutePath?: boolean;
+  octetRequest?: boolean;
+  octetResponse?: boolean;
+  documentWrite?: boolean;
   requestBytes?: ArrayBuffer;
   /**
    * Print the body on stdout even when the status is an error.
@@ -145,14 +146,7 @@ interface Invocation {
    * does not make this a local mode: nothing about the KB is inspected.
    */
   readBodyFrom?: string;
-  /**
-   * Local file (or `-`) whose contents become part of the request body.
-   *
-   * Same rule as `readBodyFrom`: the file is the caller's own material. The
-   * variants differ only in how it is encoded — JSON parsed, Markdown verbatim,
-   * or base64 for an image.
-   */
-  readPayloadFrom?: Record<string, string>;
+
 }
 
 /**
@@ -171,6 +165,17 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
   if (flags.json === "true") q.format = "json";
 
   switch (command) {
+    case "status": {
+      return { method: "GET", path: "/health", query: {} };
+    }
+
+    case "meta":
+      return { method: "GET", path: "/meta", query: { identity: flags.identity === "true" ? "true" : undefined } };
+
+    case "kb":
+      if (positional[0] !== "list") emitJsonError("Usage: x-sage kb list");
+      return { method: "GET", path: "/knowledge-bases", query: {} };
+
     case "manifest": {
       if (flags.write === "true") {
         return { method: "PUT", path: "/manifest", query: { format: "text" } };
@@ -256,6 +261,41 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
         };
       }
 
+      if (subcmd === "frontier" || subcmd === "proposals") {
+        const id = positional[1];
+        return {
+          method: "GET",
+          path: "/knowledge/" + subcmd + (subcmd === "proposals" && id ? "/" + encodeURIComponent(id) : ""),
+          query: { status: flags.status, preview: flags.preview },
+        };
+      }
+      if (subcmd === "revision") {
+        const note = "Usage: x-sage native revision <concept-id> [--revision <number>]";
+        return {
+          method: "GET", path: "/revisions",
+          query: { id: requirePositional(positional[1], note), revision: flags.revision },
+        };
+      }
+      if (subcmd === "frontier-document" || subcmd === "checkpoint-document") {
+        const action = positional[1];
+        if (action !== "read" && action !== "write") emitJsonError("Expected read or write");
+        const write = action === "write";
+        const frontier = subcmd === "frontier-document";
+        const hasBody = write || !frontier;
+        return {
+          method: write ? "PUT" : frontier ? "GET" : "POST",
+          path: "/db/v1/" + subcmd,
+          absolutePath: true,
+          query: {},
+          octetResponse: !write,
+          ...(write ? { documentWrite: true } : {}),
+          ...(hasBody ? {
+            octetRequest: true,
+            requestFile: requirePositional(positional[2], "A binary request file or - is required"),
+          } : {}),
+        };
+      }
+
       if (subcmd && Object.hasOwn(nativeMethods, subcmd)) {
         const method = subcmd as keyof typeof nativeMethods;
         return {
@@ -263,10 +303,11 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
           path: nativeService + nativeMethods[method],
           query: {},
           nativeMethod: method,
-          requestFile: requirePositional(positional[1], `Usage: x-sage native ${method} <request.json|->`),
+          octetRequest: method === "submit-large-body" || method === "commit-direct-concept",
+          requestFile: requirePositional(positional[1], `Usage: x-sage native ${method} <request-file|->`),
         };
       }
-      emitJsonError("Usage: x-sage native checkpoint <concept-id> [session] | native handshake|submit|review|commit|outcome <request.json|->");
+      emitUsageError(usage());
     }
 
     case "checkpoint": {
@@ -320,10 +361,19 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
 
     case "graph": {
       const subcmd = positional[0];
+      if (subcmd === "read" || subcmd === "export") {
+        const exportPath = subcmd === "export" ? requirePositional(positional[1], "Usage: x-sage graph export <path> [--semantic]") : undefined;
+        return {
+          method: "GET", path: "/graph",
+          query: { semantic: flags.semantic === "true" ? "true" : undefined },
+          ...(exportPath === undefined ? {} : { exportPath }),
+        };
+      }
       if (subcmd === "generate") {
         const manifest = flags.manifest === "true" ? { manifest: true } : {};
         return { method: "PUT", path: "/graph", query: { format: "text" }, body: manifest };
       }
+      if (subcmd !== undefined && subcmd !== "validate") emitUsageError(usage());
       return {
         method: "GET",
         path: "/validate",
@@ -339,7 +389,7 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
       return {
         method: "POST",
         path: "/proposals",
-        query: { format: "text" },
+        query: { format: flags.json === "true" ? "json" : "text" },
         body: {
           kind: "edge",
           from,
@@ -362,7 +412,7 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
       return {
         method: "POST",
         path: "/proposals",
-        query: { format: "text" },
+        query: { format: flags.json === "true" ? "json" : "text" },
         body: {
           kind: "atom",
           conceptId,
@@ -410,12 +460,15 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
           flags.json === "true" ? "json" : flags.format === "markdown" || flags.format === "human" ? "markdown" : "json";
         return { method: "GET", path: `/concepts/${encodeURIComponent(conceptId)}/body`, query: q };
       }
-      emitJsonError("Usage: x-sage concept body <concept-id> [--format json|markdown]");
+      if (subcmd === "create") {
+        const file = requirePositional(positional[1], "Usage: x-sage concept create <request.json|->");
+        return { method: "POST", path: "/concepts", query: {}, jsonFile: file };
+      }
+      emitJsonError("Usage: x-sage concept body <id> | concept create <request.json|->");
     }
 
-    case "knowledge": {
-      return knowledgeInvocation(args, flags, positional, q);
-    }
+    case "knowledge":
+      emitJsonError("The legacy knowledge commands have been retired. Use x-sage status for service status.");
 
     case "proposals": {
       const subcmd = positional[0];
@@ -424,7 +477,7 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
         return {
           method: "GET",
           path: `/proposals/${encodeURIComponent(file)}`,
-          query: { format: flags.json === "true" ? "json" : "text" },
+          query: { format: flags.json === "true" || flags.format === "json" ? "json" : "text" },
           reportToStdout: true,
         };
       }
@@ -432,11 +485,12 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
         return {
           method: "POST",
           path: "/proposals/merge",
-          query: { format: "text" },
+          query: { format: flags.json === "true" ? "json" : "text" },
           body: { file: positional[1] ?? "all" },
         };
       }
-      return { method: "GET", path: "/proposals", query: { format: "text" } };
+      if (subcmd !== undefined && subcmd !== "list") emitUsageError(usage());
+      return { method: "GET", path: "/proposals", query: { format: flags.json === "true" ? "json" : "text" } };
     }
 
     case "viz": {
@@ -451,208 +505,13 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
       if (output === undefined) {
         emitJsonError("Usage: x-sage viz export <path>   (the web UI reads /api/viz; no default path)");
       }
-      return { method: "GET", path: "/viz", query: { format: "json", export: output } };
+      return { method: "GET", path: "/viz", query: { format: "json" }, exportPath: output };
     }
 
     default:
       // Unknown command is a usage error, not a successful invocation.
       emitUsageError(usage());
   }
-}
-
-/**
- * `x-sage knowledge …` — the structured-authority surface.
- *
- * Every subcommand is one REST request; the CLI still reads no KB data. Where a
- * request needs a body built from local files (`propose --payload`, `document
- * edit`), the file is the caller's own material, not KB state.
- */
-function knowledgeInvocation(
-  args: string[],
-  flags: Record<string, string>,
-  positional: string[],
-  q: Record<string, string | undefined>,
-): Invocation {
-  const sub = positional[0];
-  const text = flags.json === "true" ? "json" : "text";
-
-  if (sub === "status") {
-    return { method: "GET", path: "/knowledge/status", query: { format: "json" } };
-  }
-
-  if (sub === "import") {
-    return {
-      method: "POST",
-      path: "/knowledge/import",
-      query: { format: text },
-      body: { mode: "authority", ...(flags.reimport === "true" ? { reimport: true } : {}) },
-    };
-  }
-
-  if (sub === "concepts") {
-    return { method: "GET", path: "/knowledge/concepts", query: { format: "json" } };
-  }
-
-  if (sub === "document") {
-    const conceptId = requirePositional(
-      positional[1],
-      "Usage: x-sage knowledge document <concept-id> [--format markdown|json]",
-    );
-    return {
-      method: "GET",
-      path: `/knowledge/concepts/${encodeURIComponent(conceptId)}/document`,
-      query: {
-        format: flags.json === "true" ? "json" : flags.format === "json" ? "json" : "markdown",
-      },
-    };
-  }
-
-  if (sub === "claims") {
-    const conceptId = requirePositional(positional[1], "Usage: x-sage knowledge claims <concept-id>");
-    return {
-      method: "GET",
-      path: `/knowledge/concepts/${encodeURIComponent(conceptId)}/claims`,
-      query: { format: "json" },
-    };
-  }
-
-  if (sub === "evidence") {
-    const target = requirePositional(
-      positional[1],
-      "Usage: x-sage knowledge evidence <concept-id> | x-sage knowledge evidence claim:<claim-id>",
-    );
-    if (target.startsWith("claim:")) {
-      const claimId = target.slice("claim:".length);
-      return {
-        method: "GET",
-        path: `/knowledge/claims/${encodeURIComponent(claimId)}/evidence`,
-        query: { format: "json" },
-      };
-    }
-    return {
-      method: "GET",
-      path: `/knowledge/concepts/${encodeURIComponent(target)}/evidence`,
-      query: { format: "json" },
-    };
-  }
-
-  if (sub === "propose") {
-    const kind = requirePositional(
-      flags.kind,
-      "Usage: x-sage knowledge propose --kind <claim-create|claim-edit|evidence-attach|relation-assert|concept-markdown> --subject <id> --expected-revision <rev> --reason <why> --author <id> (--payload <json-file|-> | --document <md-file|->)",
-    );
-    const subject = requirePositional(flags.subject, "Missing --subject");
-    const expectedRevision = requirePositional(flags["expected-revision"], "Missing --expected-revision");
-    const reason = requirePositional(flags.reason, "Missing --reason");
-    const author = requirePositional(flags.author, "Missing --author");
-    const payloadFile = flags.payload;
-    const documentFile = flags.document;
-    if (payloadFile === undefined && documentFile === undefined) {
-      emitJsonError("Provide --payload <json-file|-> or --document <markdown-file|->");
-    }
-    return {
-      method: "POST",
-      path: "/knowledge/proposals",
-      query: { format: text },
-      body: { kind, subject, expectedRevision, reason, author, payload: {} },
-      // Filled by main(): the payload is the caller's local file.
-      readPayloadFrom: payloadFile === undefined ? { document: documentFile! } : { payload: payloadFile },
-    };
-  }
-
-  if (sub === "revisions") {
-    const kind = requirePositional(
-      flags.kind,
-      "Usage: x-sage knowledge revisions --kind <proposal-kind> --subject <concept-id>",
-    );
-    const subject = requirePositional(flags.subject, "Missing --subject");
-    return {
-      method: "GET",
-      path: "/knowledge/revisions",
-      query: { format: "json", kind, subject },
-    };
-  }
-
-  if (sub === "proposals") {
-    const status = flags.status;
-    return {
-      method: "GET",
-      path: "/knowledge/proposals",
-      query: { format: text, ...(status === undefined ? {} : { status }) },
-    };
-  }
-
-  if (sub === "review") {
-    const id = requirePositional(positional[1], "Usage: x-sage knowledge review <proposal-id> --decision approve|reject --reviewer <id> [--note <text>]");
-    const decision = requirePositional(flags.decision, "Missing --decision approve|reject");
-    if (decision !== "approve" && decision !== "reject") emitJsonError("--decision must be approve or reject");
-    const reviewer = requirePositional(flags.reviewer, "Missing --reviewer");
-    return {
-      method: "POST",
-      path: `/knowledge/proposals/${encodeURIComponent(id)}/review`,
-      query: { format: text },
-      body: { decision, reviewer, ...(flags.note === undefined ? {} : { note: flags.note }) },
-    };
-  }
-
-  if (sub === "search") {
-    const query = requirePositional(
-      positional[1],
-      "Usage: x-sage knowledge search <text> [--limit N] [--vector <json-file|->]",
-    );
-    return {
-      method: "POST",
-      path: "/knowledge/search",
-      query: { format: "json" },
-      body: { query, ...(flags.limit === undefined ? {} : { limit: Number.parseInt(flags.limit, 10) }) },
-      ...(flags.vector === undefined ? {} : { readPayloadFrom: { vector: flags.vector } }),
-    };
-  }
-
-  if (sub === "vectors") {
-    const file = requirePositional(
-      positional[1],
-      "Usage: x-sage knowledge vectors <vectors.json|->   (one { vectors: [...] } document)",
-    );
-    return {
-      method: "POST",
-      path: "/knowledge/vectors",
-      query: { format: "json" },
-      body: {},
-      readPayloadFrom: { vectors: file },
-    };
-  }
-
-  if (sub === "asset") {
-    const file = requirePositional(
-      positional[1],
-      "Usage: x-sage knowledge asset <image-file>   (uploads and prints the content address)",
-    );
-    return {
-      method: "POST",
-      path: "/knowledge/assets",
-      query: { format: "json" },
-      body: {},
-      readPayloadFrom: { asset: file },
-    };
-  }
-
-  emitJsonError(`Knowledge subcommands:
-  knowledge status                      Authority and record counts
-  knowledge import [--reimport]         Migrate Markdown into the structured store
-  knowledge concepts                    List structured concepts
-  knowledge document <id> [--format markdown|json]
-  knowledge claims <id>                 Accepted claims with their evidence
-  knowledge evidence <concept-id|claim:<claim-id>>
-  knowledge propose --kind K --subject S --expected-revision R --reason W --author A
-                    (--payload <json-file|-> | --document <md-file|->)
-  knowledge revisions --kind K --subject S
-  knowledge proposals [--status pending|approved|rejected|conflicted]
-  knowledge review <proposal-id> --decision approve|reject --reviewer <id> [--note <text>]
-  knowledge search <text> [--limit N] [--vector <json-file|->]
-  knowledge vectors <file|->            Upload externally computed embeddings
-  knowledge asset <image-file>          Store an image, print its content address
-`);
 }
 
 function usage(): string {
@@ -663,21 +522,31 @@ Usage: x-sage <command> [args] [flags]
 Connection:
   --server <url>                        Server base URL
   --token <token>                       Bearer token for an authenticated server
+  --kb <id>                             Select a KB on the public REST server
 
   Resolution: flags > environment > config file.
     X_SAGE_SERVER / X_SAGE_TOKEN        environment
     ~/.config/x-sage/config.toml        server = "...", token = "..."
                                         (honours XDG_CONFIG_HOME)
 
-Native Rust service:
+Native Rust service (use its private endpoint and role credential):
   native checkpoint <concept-id> [session-number]
   native handshake|submit|review|commit|outcome <request.json|->
+  native read-term-text|read-term-document|read-term-activation <request.json|->
+  native read-graph-snapshot|read-proposal-files <request.json|->
+  native submit-large-body|commit-direct-concept <request.bin|->
+  native revision <concept-id> [--revision <number>]
+  native frontier | proposals [id] [--status S] [--preview]
+  native frontier-document read | write <request.bin|->
+  native checkpoint-document read|write <request.bin|->
 
-Every command makes one HTTP request. The client holds no KB data. Native
-commands send the caller's request bytes directly. Exit 2 means a native
-attempt or outcome was inconclusive; look up the original request id.
+The client holds no KB data. Native RPC commands send the caller's request
+bytes directly. Exit 2 means a native attempt or outcome was inconclusive;
+look up the original request id.
 
 Read:
+  status                                Show service health and reported authority
+  kb list | meta [--identity]            List KBs or show metadata
   manifest [--write]                    Render MANIFEST.md; --write persists it
   search <keyword> [--format manifest] [--json]
   activate <id> [--format ai|human] [--depth N] [--strategy S]
@@ -688,33 +557,50 @@ Read:
 Validate:
   validate [--graph] [--json]           Files; --graph adds integrity + staleness
 
-Structured knowledge (see docs/knowledge-store.md):
-  knowledge status | import [--reimport] | concepts | document <id>
-  knowledge claims <id> | evidence <concept-id|claim:id>
-  knowledge propose --kind K --subject S --expected-revision R --reason W --author A
-  knowledge proposals [--status S] | review <proposal-id> --decision approve|reject --reviewer <id>
-  knowledge revisions --kind K --subject S    Baseline the server will accept for that proposal
-  knowledge search <text> [--limit N] [--vector <file|->]
-  knowledge vectors <file|-> | asset <image-file>
-
 Write-back (needs --token when the server requires one):
   concept body <id> [--format json|markdown]   Read the body + revision
+  concept create <request.json|->             Submit frontmatter and body for creation
   propose-edge <from> <type> <target> [--confidence C]
   refine-atom <concept-id> --atom "text" [--reason "text"]
   refine-body <id> --file <path|-> --expected-revision <rev> --reason "why"
-  proposals list | proposals show <file> | proposals merge [file|all]
+  proposals list | proposals show <file> | proposals merge [file|all] [--json]
   frontier list | frontier add <concept> --source "..." --reason "..." [--priority P]
   checkpoint create <id> [session] | read <id> [session] | save -   (save reads stdin)
 
 Graph:
-  graph generate [--manifest]           Rebuild graph.json (+ MANIFEST.md)
+  graph read | export <path> [--semantic]
+  graph generate [--manifest] | validate
 
 Viz:
   viz stats | viz export <path>
 
-Meta:
+Offline administration (use a source checkout):
+  admin archive|plan|import|backup|restore [--workspace <path>] <tool arguments>
+
+Version:
   --version | version                  Print CLI version + build commit (local, no server)
 `;
+}
+
+/** Recognize the public adapter's explicit refusal in either negotiated format. */
+function isDisconnectedRoute(response: Response, body: string): boolean {
+  if (response.status !== 503) return false;
+  const message = "Operation is not connected to x-sage-db";
+  if (body.trim() === message) return true;
+  try {
+    return JSON.parse(body)?.error === message;
+  } catch {
+    return false;
+  }
+}
+
+function readHealth(body: string): { ok: boolean; authority?: string; databaseReady?: boolean } | undefined {
+  try {
+    const status = JSON.parse(body);
+    if (typeof status?.ok === "boolean") return status;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Run the invocation against a deployed server. */
@@ -726,34 +612,48 @@ async function runRemote(
 ): Promise<void> {
   const stream = invocation.reportToStdout === true ? "out" : undefined;
   const base = server.endsWith("/") ? server.slice(0, -1) : server;
-  const url = new URL(`${base}${invocation.nativeMethod ? "" : "/api"}${invocation.path}`);
-  const mutations = invocation.nativeMethod === "submit" ||
-    invocation.nativeMethod === "review" || invocation.nativeMethod === "commit";
+  const privateTransport = invocation.nativeMethod !== undefined || invocation.absolutePath === true;
+  const url = new URL(`${base}${privateTransport ? "" : "/api"}${invocation.path}`);
+  const rpcMutation = invocation.nativeMethod === "submit" || invocation.nativeMethod === "review" ||
+    invocation.nativeMethod === "commit" || invocation.nativeMethod === "submit-large-body" ||
+    invocation.nativeMethod === "commit-direct-concept";
+  const mutations = rpcMutation || invocation.documentWrite === true;
+  const unresolved = invocation.documentWrite
+    ? "Inspect the private document before retrying."
+    : "Look up the original request id.";
   for (const [key, value] of Object.entries(invocation.query)) {
     if (value !== undefined) url.searchParams.set(key, value);
   }
 
-  const headers: Record<string, string> = { accept };
+  const headers: Record<string, string> = { accept: invocation.octetResponse ? "application/octet-stream" : accept };
   if (token !== undefined) headers.authorization = `Bearer ${token}`;
   const outbound = invocation.requestBytes ??
     (invocation.body === undefined ? undefined : JSON.stringify(invocation.body));
-  if (outbound !== undefined) headers["content-type"] = "application/json";
+  if (outbound !== undefined) headers["content-type"] = invocation.octetRequest ? "application/octet-stream" : "application/json";
 
   let response: Response;
   try {
     response = await fetch(url, {
       method: invocation.method,
       headers,
-      ...(invocation.nativeMethod ? { redirect: "error" as const } : {}),
+      ...(privateTransport ? { redirect: "error" as const } : {}),
       ...(outbound === undefined ? {} : { body: outbound }),
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     if (mutations) {
-      writeAll("err", `Request result unconfirmed at ${url.origin}. Look up the original request id.\n`);
+      writeAll("err", `Request result unconfirmed at ${url.origin}. ${unresolved}\n`);
       process.exit(2);
     }
     emitJsonError(`cannot reach ${url.origin}: ${detail}`);
+  }
+
+  if (invocation.octetResponse && response.ok) {
+    if (response.headers.get("content-type") !== "application/octet-stream") {
+      emitJsonError("Expected a binary response from the private Rust endpoint.");
+    }
+    writeAll("out", await response.arrayBuffer());
+    process.exit(0);
   }
 
   let body: string;
@@ -761,10 +661,33 @@ async function runRemote(
     body = await response.text();
   } catch (error) {
     if (mutations) {
-      writeAll("err", "Request response incomplete. Look up the original request id.\n");
+      writeAll("err", `Request response incomplete. ${unresolved}\n`);
       process.exit(2);
     }
     throw error;
+  }
+
+  if (invocation.path === "/health") {
+    const health = readHealth(body);
+    if (health === undefined && response.ok) emitJsonError("The service health endpoint did not return a status report.");
+    if (health !== undefined && (!health.ok || (health.authority === "sage-db" && health.databaseReady !== true))) {
+      emit({ status: response.ok ? 503 : response.status, contentType: "application/json", body });
+    }
+  }
+
+  if ((invocation.path.startsWith("/knowledge/") || invocation.path === "/revisions") && isDisconnectedRoute(response, body)) {
+    if (invocation.path.startsWith("/knowledge/checkpoints/")) {
+      emitJsonError("Native checkpoint reads use the private Rust endpoint. At the public endpoint, use x-sage checkpoint read <id> [session].");
+    }
+    emitJsonError("This native read uses the private Rust endpoint and its role credential.");
+  }
+
+  if (privateTransport && response.headers.get("content-type")?.toLowerCase().startsWith("text/html")) {
+    if (mutations && (response.ok || response.status === 408 || response.status >= 500)) {
+      writeAll("err", `Native response is HTML. Check the private Rust endpoint. ${unresolved}\n`);
+      process.exit(2);
+    }
+    emitJsonError("Native RPC received HTML. Set --server to the private Rust endpoint and use its role credential.");
   }
 
   if (invocation.nativeMethod && response.ok) {
@@ -782,7 +705,7 @@ async function runRemote(
       writeAll("err", body);
       process.exit(1);
     }
-    if ((mutations && !reply?.outcome?.committed?.recorded && !reply?.outcome?.alreadyCommitted?.recorded) ||
+    if ((rpcMutation && !reply?.outcome?.committed?.recorded && !reply?.outcome?.alreadyCommitted?.recorded) ||
         (invocation.nativeMethod === "outcome" && !reply?.found?.recorded && !reply?.absent)) {
       writeAll("out", body);
       process.exit(2);
@@ -791,16 +714,47 @@ async function runRemote(
     writeAll("err", body);
     process.exit(2);
   }
+  if (invocation.documentWrite && response.ok && response.status !== 204) {
+    writeAll("err", `Unexpected native document acknowledgement. ${unresolved}\n`);
+    process.exit(2);
+  }
 
-  // `viz export` writes the payload to a file instead of stdout.
-  const exportPath = invocation.query.export;
+  const exportPath = invocation.exportPath;
   if (exportPath !== undefined && response.ok) {
     await Bun.write(exportPath, body);
-    writeAll("out", `Exported viz payload → ${exportPath}\n`);
+    writeAll("out", `Exported ${invocation.path.slice(1)} payload → ${exportPath}\n`);
     process.exit(0);
   }
 
   emit({ status: response.status, contentType: response.headers.get("content-type") ?? "", body }, stream);
+}
+
+async function runAdmin(command: string | undefined, args: string[]): Promise<void> {
+  if (!command || !["archive", "plan", "import", "backup", "restore"].includes(command)) {
+    emitUsageError(usage());
+  }
+  const workspaceFlag = args.indexOf("--workspace");
+  const workspace = workspaceFlag < 0
+    ? resolve(import.meta.dir, "../../..")
+    : resolve(requirePositional(args[workspaceFlag + 1], "--workspace needs a source checkout path"));
+  if (workspaceFlag >= 0) args.splice(workspaceFlag, 2);
+  const manifest = resolve(workspace, "sage-db/Cargo.toml");
+  if (!existsSync(manifest)) emitJsonError("Provide --workspace <x-sage checkout> for offline administration.");
+  let program: string[];
+  if (command === "archive" || command === "plan") {
+    const tool = command === "archive" ? "tools/sage-db-source-archive.ts" : "tools/sage-db-import-plan.ts";
+    program = [process.execPath, resolve(workspace, tool)];
+  } else {
+    const toolchain = await Bun.file(resolve(workspace, "sage-db/rust-toolchain.toml")).text();
+    const channel = /^channel\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"/m.exec(toolchain)?.[1];
+    if (!channel) emitJsonError("Could not read the checkout's pinned Rust toolchain.");
+    program = ["cargo", "+" + channel, "run", "--quiet", "--locked", "--manifest-path", manifest,
+      "-p", "sage-db-migrate", "--bin", "sage-db-admin", "--", command];
+  }
+  const child = Bun.spawn([...program, ...args], {
+    stdin: "inherit", stdout: "inherit", stderr: "inherit",
+  });
+  process.exitCode = await child.exited;
 }
 
 async function main(): Promise<void> {
@@ -825,8 +779,20 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  const kbFlag = allArgs[0] === "admin" || !allArgs.includes("--kb")
+    ? undefined
+    : requirePositional(takeFlag("kb"), "Provide a knowledge-base id after --kb.");
   const command = allArgs[0];
   if (command === undefined) emitUsageError(usage());
+  if (command === "--help" || command === "-h" || command === "help") {
+    writeAll("out", usage());
+    return;
+  }
+  if (command === "admin") {
+    await runAdmin(allArgs[1], allArgs.slice(2));
+    return;
+  }
+
 
   // `checkpoint save -` streams a checkpoint in: a client cannot read a
   // server-side path, so stdin is the only transfer that works remotely.
@@ -841,6 +807,19 @@ async function main(): Promise<void> {
   }
 
   const invocation = invoke(command, allArgs.slice(1), stdinCheckpoint);
+  if (kbFlag !== undefined) {
+    if (command === "native") emitJsonError("Native requests select their KB through the private endpoint and request envelope.");
+    invocation.query.kb = kbFlag;
+  }
+  if (invocation.jsonFile !== undefined) {
+    const file = invocation.jsonFile;
+    const body = file === "-" ? await new Response(Bun.stdin.stream()).text() : await Bun.file(file).text();
+    try {
+      invocation.body = JSON.parse(body);
+    } catch {
+      emitJsonError("concept create requires a JSON object with frontmatter and body.");
+    }
+  }
 
   if (invocation.requestFile !== undefined) {
     const file = invocation.requestFile;
@@ -848,51 +827,6 @@ async function main(): Promise<void> {
       ? await new Response(Bun.stdin.stream()).arrayBuffer()
       : await Bun.file(file).arrayBuffer();
     if (invocation.requestBytes.byteLength === 0) emitJsonError("Native request is empty");
-  }
-
-  if (invocation.readPayloadFrom !== undefined) {
-    for (const [target, source] of Object.entries(invocation.readPayloadFrom)) {
-      const raw =
-        source === "-"
-          ? await new Response(Bun.stdin.stream()).arrayBuffer()
-          : await Bun.file(source).arrayBuffer().catch((err: unknown) => {
-              emitJsonError(`cannot read ${source}: ${err instanceof Error ? err.message : String(err)}`);
-            });
-      const bytes = new Uint8Array(raw);
-      if (bytes.byteLength === 0) emitJsonError(`${source} is empty`);
-
-      if (target === "asset") {
-        const base64 = Buffer.from(bytes).toString("base64");
-        const mediaType = sniffMediaType(bytes);
-        invocation.body = {
-          ...(invocation.body as Record<string, unknown>),
-          data: base64,
-          ...(mediaType === undefined ? {} : { mediaType }),
-        };
-        continue;
-      }
-
-      const text = Buffer.from(bytes).toString("utf8");
-      if (target === "document") {
-        invocation.body = { ...(invocation.body as Record<string, unknown>), payload: { document: text } };
-        continue;
-      }
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        emitJsonError(`${source} is not valid JSON`);
-      }
-      invocation.body =
-        target === "payload"
-          ? { ...(invocation.body as Record<string, unknown>), payload: parsed }
-          : target === "vector"
-            ? { ...(invocation.body as Record<string, unknown>), vector: parsed }
-            : target === "vectors"
-              ? parsed
-              : invocation.body;
-    }
   }
 
   if (invocation.readBodyFrom !== undefined) {

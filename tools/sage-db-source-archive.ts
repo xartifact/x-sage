@@ -45,8 +45,7 @@
  *
  * No repo modules are imported: this tool must run against a deployed KB from a
  * checkout that has never installed workspace dependencies. The schema profile
- * below is checked against `packages/service/src/store/schema.ts` by the test
- * suite, so drift fails a test instead of silently changing the archive.
+ * below is checked against the frozen SQLite v1 DDL in `tools/fixtures/sqlite-v1.sql`.
  *
  * CLI:
  *   bun tools/sage-db-source-archive.ts \
@@ -123,7 +122,7 @@ export interface ColumnProfile {
 /**
  * Exact table/column policy of schema version 1.
  *
- * Mirrors the DDL in `packages/service/src/store/schema.ts`. Tables are listed in
+ * Mirrors the archived SQLite v1 DDL. Tables are listed in
  * DDL order so rows are emitted in a stable, reviewable sequence; each table's
  * primary key doubles as the deterministic row order. A table or column outside
  * this profile is refused rather than exported as an unclassified blob.

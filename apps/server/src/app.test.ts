@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { createApp } from "../src/app.ts";
 
 /**
@@ -25,7 +27,32 @@ describe("read endpoints", () => {
     expect(res.status).toBe(200);
     const body = await json(res);
     expect(body.ok).toBe(true);
+    expect(body.authority).toBe("markdown");
     expect(body.kb).toEndWith("kb/default");
+  });
+
+  test("retired imports create no database and old database files block Markdown fallback", async () => {
+    const root = await mkdtemp(join(tmpdir(), "x-sage-retired-store-"));
+    try {
+      const isolated = createApp({ kbRoot: root });
+      const retired = await isolated.request("/api/knowledge/import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(retired.status).toBe(404);
+      expect(await readdir(root)).toEqual([]);
+
+      const sidecar = join(root, "knowledge.db-wal");
+      await writeFile(sidecar, "unmigrated evidence");
+      const health = await isolated.request("/api/health");
+      expect(health.status).toBe(503);
+      expect(await json(health)).toMatchObject({ ok: false });
+      expect((await isolated.request("/api/graph")).status).toBe(503);
+      expect(await readFile(sidecar, "utf8")).toBe("unmigrated evidence");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test("health reports build identity for deployment assertions", async () => {

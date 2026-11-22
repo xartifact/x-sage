@@ -8,15 +8,12 @@ description: 通过 x-sage REST 服务读写「AI-Native 概念知识库」：�
 x-sage 是一个**概念知识库**：不是文档库，也不是向量检索。工具在读取时计算传递闭包与
 对称边，所以「问一个概念和什么冲突」这类问题不需要你自己遍历。
 
-权威记录有两种，先问清楚用的是哪一种：
+生产 Bun HTTPS 入口连接 Rust x-sage-db。用 `x-sage status` 检查
+`authority: "sage-db"`、`mode: "active"` 和 `databaseReady: true`。
+本地 Markdown 开发服务报告 `authority: "markdown"`。
 
-| 权威 | 判据 | 真源 | 写入方式 |
-|---|---|---|---|
-| Markdown | 未导入 | `concepts/*.md` | `propose-edge` / `refine-atom` / `refine-body` + `proposals merge` |
-| 结构化 | `GET /api/knowledge/status` → `authority: "structured"` | `knowledge.db` | `knowledge propose` + `knowledge review` |
-
-结构化权威下旧写路径返回 **409**。断言、证据、外部向量只在结构化权威下存在，
-见 `docs/knowledge-store.md`。
+线上概念和关系使用 REST 提案，公网检查点使用 `checkpoint read`。
+`native` 命令使用管理员提供的私有 Rust 地址和该地址的角色凭据。
 
 **架构是标准 C/S**：所有客户端（含 `x-sage` CLI）都是 REST 客户端。服务端是唯一读得到
 知识库的组件，客户机没有任何 KB 文件。因此**必须先有一个可达的服务端**。
@@ -105,11 +102,11 @@ L3 不应作为其他概念的 `depends-on` 前置：实例是可替换的实现
 
 | 触发条件 | 操作 | 落到哪 |
 |---|---|---|
-| 发现两个概念间有未记录的关联 | `propose-edge` | `proposals/edges/` |
-| 当前 atom 不足以区分两个相似概念 | `refine-atom` | `proposals/atoms/` |
-| 正文结论已被推翻，摘要改了但正文还写着旧结论 | `refine-body` | `proposals/bodies/` |
-| 发现两个概念存在未记录的矛盾 | 直接编辑 frontier.md | `frontier.md`「概念内张力」表 |
-| 会话结束、有值得固化的结论 | `checkpoint` | `checkpoints/` |
+| 发现两个概念间有未记录的关联 | `propose-edge` | 待审关系提案 |
+| 当前 atom 不足以区分两个相似概念 | `refine-atom` | 待审摘要提案 |
+| 正文结论已被推翻，摘要改了但正文还写着旧结论 | `refine-body` | 待审正文提案 |
+| 发现两个概念存在未记录的矛盾 | `propose-edge <from> contradicts <to>` | 待审矛盾关系提案 |
+| 会话结束、有值得固化的结论 | `checkpoint` | 服务端快照 |
 
 **推理中的自检**：如果你在某个概念上做了「边里没写」的推断，那就是一次 `propose-edge`
 候选——但标 `hypothetical`，因为你还没验证。
@@ -119,11 +116,12 @@ L3 不应作为其他概念的 `depends-on` 前置：实例是可替换的实现
 ## 第零步：确认服务端可达
 
 ```bash
-curl -s "$X_SAGE_SERVER/api/health"
-# {"ok":true,"kb":"/app/kb/default","version":"...","commitHash":"...","buildRef":"..."}
+curl -fsS "${X_SAGE_SERVER%/}/api/health"
+# Rust 生产入口回报 {"ok":true,"authority":"sage-db","mode":"active","databaseReady":true,...}
 ```
 
-不可达时先问用户服务地址，不要猜测、不要试图读本地文件代替。
+`x-sage status` 沿用现有地址配置并读取同一健康响应。地址取自用户或现有配置。
+用 `x-sage kb list` 查询可用知识库，并用 `--kb <id>` 选择。用 `x-sage meta` 查看概念数和作者关系数。
 
 **地址与 token 的优先级**：`--server` / `--token` > 环境变量 > 配置文件
 `~/.config/x-sage/config.toml`（遵循 `XDG_CONFIG_HOME`）。
@@ -227,7 +225,8 @@ x-sage propose-edge agent analogous-to context --confidence hypothetical
 x-sage refine-atom decision --atom "新的精华描述" --reason "为什么更好"
 
 x-sage proposals list        # 看待审
-x-sage proposals merge all   # 合并回概念文件（人类 review 后才应执行）
+x-sage proposals list --json # 供脚本读取
+x-sage proposals merge <file>   # 人类审阅后应用指定提案
 ```
 
 ### 改正文（不只 atom）
@@ -246,89 +245,26 @@ x-sage concept body <id> --format markdown      # 读回，应与候选逐字节
 
 - `revision` 是提交与合并的双重基线：期间有人改了 atom、边或正文都会让合并返回 409，
   提案保持 `pending`，重新读取后重提即可。
-- 只替换 frontmatter 之后的字节，元数据不会被重写。
+- 正文提案只修改正文。再次读回时以服务端版本为准。
 - 正文不参与 `graph.json` / `MANIFEST.md` 的生成，合并后**不需要**重建产物。
-- 提案文件是 JSON（`proposals/bodies/`），不是 Markdown——正文以 `---` 开头时
-  后者会被 YAML 解析吃掉。
+- 提交返回的提案标识用于 `proposals show` 和 `proposals merge`。在 Rust 服务中它是兼容标识。
+- 关系目标尚未建立时可以提交。审批返回 422 时保留待审提案，待目标存在后再审。
 
 `confidence` 三档：`confirmed`（可作推理基础）、`hypothetical`（可探索，不可当公理）、
 `contested`（存在对立观点，需辩证处理）。**不要把自己的推测标成 confirmed。**
 
-## 结构化权威：断言、证据、混合检索
-
-`GET /api/knowledge/status` 的 `authority` 是 `structured` 时使用这一节。
-
-### 读
-
-```bash
-x-sage knowledge status                       # 权威 + 计数
-x-sage knowledge document <id>                # 可编辑 Markdown（含 claims 块）
-x-sage knowledge document <id> --json         # 带 revision / conceptRevision
-x-sage knowledge claims <id>                  # accepted 断言 + 其证据
-x-sage knowledge evidence <id> | claim:<clm_…>
-x-sage knowledge search "延迟 约束" --limit 5   # 词法 + 可选向量，返回匹配依据
-```
-
-`activate` / `edges` / `graph` / `viz` / `manifest` 在结构化权威下读同一份数据，
-返回结构不变。
-
-### 写：提案 + 审阅
-
-```bash
-# 1. 取基线。kind 与 subject 决定基线，别自己算。
-curl -s "$S/api/knowledge/revisions?kind=claim-create&subject=review-premise" | jq -r .expectedRevision
-
-# 2. 提交
-x-sage knowledge propose --kind claim-create --subject review-premise   --expected-revision <rev> --reason "为什么" --author <你的标识>   --payload claim.json
-
-# 3. 人类审阅（不要自己批准自己的提案）
-x-sage knowledge proposals --status pending
-x-sage knowledge review prp_… --decision approve --reviewer <审阅者>
-```
-
-| kind | 基线含义 |
-|---|---|
-| `claim-create` | 概念审阅基线（记录 + accepted 断言） |
-| `claim-edit` | 该断言的版本 |
-| `evidence-attach` | 概念审阅基线 |
-| `relation-assert` | 该概念的关系集合版本 |
-| `concept-markdown` | 导出文档的字节哈希（`document.revision`） |
-
-- 基线不符 → 409，什么都不写；审阅时基线变了 → 提案转 `conflicted`，可重新提交。
-- `document` 返回的 `revision` 是**文档**基线（写回用），`conceptRevision` 是概念
-  审阅基线（断言/证据用）。别把两个字符串互换。
-- 断言文本可含换行与 `::`，投影会转义换行，不会丢内容。
-- 证据：图片先 `knowledge asset <file>` 拿内容地址，再提交 `evidence-attach`；
-  只接受 PNG/JPEG/WebP/GIF，媒体类型按字节判定。
-- 跨库目标（`otherkb::concept`）在结构化权威下被拒绝：一库一数据库。
-
-### 外部向量
-
-嵌入由你在本地算，服务端只校验与存储：
-
-```bash
-# 被嵌入的文本由服务端约定：concept = atom + 空行 + body
-x-sage knowledge vectors vectors.json    # [{ subjectType, subjectId, model, revision, values }]
-```
-
-`revision` 必须是被嵌入文本的 sha256（文本拼法见 `docs/knowledge-store.md`）。
-不符 → 409：这说明你的嵌入管道已经过期，重新嵌入而不是让服务端静默忽略。
-**不要把随机或占位向量当真实语义检索**——它只会污染结果并把 `cosine` 变成噪声。
-
 ## 校验与产物重建
 
 ```bash
-x-sage validate --graph      # 文件 schema + 图完整性 + graph.json 是否落后
-x-sage graph generate        # 概念文件 → graph.json
-x-sage manifest --write      # 概念文件 → MANIFEST.md
+x-sage validate --graph      # 校验当前服务端数据及图完整性
+x-sage graph read            # 读取作者图 JSON
+x-sage graph export graph.json --semantic  # 导出含派生关系的语义图
+x-sage graph generate        # 生成 graph.json 投影
+x-sage manifest --write      # 生成 MANIFEST.md 投影
 ```
 
-`graph.json` 和 `MANIFEST.md` 都是生成物。提交前跑 `validate --graph`，它会在产物落后于
-概念文件时报 `stale-graph`。
-
-**结构化权威下两者都不是文件**：`GET /api/manifest` 与 `GET /api/graph` 从数据库生成，
-`PUT` 返回 409。导入时磁盘上的这两个文件已被替换成指向 `archive/markdown-<ts>/` 的说明，
-所以用编辑器打开不会看到「看起来像最新」的旧内容。
+`sage-db` 从当前数据库生成图和清单。重建命令更新服务端投影，读取命令从当前数据库取得内容。
+Markdown 服务的 `validate --graph` 还会报告文件投影过期。
 
 ## 会话快照
 
@@ -344,10 +280,9 @@ x-sage checkpoint save - < cp.json      # 从 stdin 写完整快照
 
 ## 禁止事项
 
-0. **不要绕过审阅** —— 结构化权威下所有写入都是提案；不要自己批准自己的提案，也不要把
-   `hypothetical` 的断言说成结论。
-1. **不要用 `frontier` 记录「概念内张力」或「L2→L3 展开方向」** —— `frontier add` 只向
-   「未决概念」表插入一行，不碰另两节；这两节仍只能直接编辑文件。不要用 `add` 去表达张力。
+0. **提案交由人类审阅** —— 由获授权的审阅者应用概念和关系提案。
+1. **`frontier add` 用于「未决概念」** —— 概念间的矛盾通过 `contradicts` 关系提案表达。
+   其余 Frontier 章节交由服务维护者处理。
 2. **不要把 hypothetical 当 confirmed 用** —— 未验证的关联不可作为推理基础。
 3. **不要消除张力的两端** —— 张力是真实结构，只能管理不能消除。
 4. **不要跳过 `depends-on` 前置** —— 加载顺序影响推理结论。
@@ -359,6 +294,7 @@ CLI 只是薄传输层，等价调用：
 
 | CLI | REST |
 |---|---|
+| `status` | `GET /api/health` |
 | `search <kw>` | `GET /api/search?q=` |
 | `activate <id>` | `GET /api/concepts/<id>?format=text` |
 | `edges <id> --dir in` | `GET /api/concepts/<id>/edges?dir=in` |
@@ -371,13 +307,5 @@ CLI 只是薄传输层，等价调用：
 | `proposals show <file>` | `GET /api/proposals/<file>` |
 | `graph generate` | `PUT /api/graph` |
 | `manifest --write` | `PUT /api/manifest` |
-| `knowledge status` | `GET /api/knowledge/status` |
-| `knowledge import` | `POST /api/knowledge/import` |
-| `knowledge document <id>` | `GET /api/knowledge/concepts/<id>/document` |
-| `knowledge propose …` | `POST /api/knowledge/proposals` |
-| `knowledge review <id>` | `POST /api/knowledge/proposals/<id>/review` |
-| `knowledge search` | `POST /api/knowledge/search` |
-| `knowledge vectors <f>` | `POST /api/knowledge/vectors` |
-| `knowledge asset <f>` | `POST /api/knowledge/assets` |
 
 `format` 可协商：`json`（默认）、`text`（AI 文本）、`markdown`（原文）、`manifest`（表格）。

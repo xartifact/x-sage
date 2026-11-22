@@ -122,20 +122,22 @@ function sha256File(file: string): string {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
 }
 
-/**
- * Build a database at `<source>/knowledge.db` using the **service's own**
- * `openStore`.
- *
- * Fixtures must be shaped by the real DDL, not by a handwritten copy: a lookalike
- * would let the exporter and its test agree on a schema the product does not
- * have. Importing the module directly is safe here — this is a test, and the
- * exporter under test imports nothing from the repo.
- */
+const legacySchema = readFileSync(new URL("./fixtures/sqlite-v1.sql", import.meta.url), "utf8");
+
+/** Open a fixture using the frozen schema from the retired SQLite service. */
+function openLegacyFixture(root: string): Database {
+  const db = new Database(join(root, "knowledge.db"), { create: true, readwrite: true });
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+  db.exec(legacySchema);
+  return db;
+}
+
+/** Build an offline source fixture using the original SQLite layout. */
 function buildDatabase(
   source: string,
   options: { imported: boolean; rows?: (db: Database) => void } = { imported: true },
 ): void {
-  const db = openStore(source, { create: true });
+  const db = openLegacyFixture(source);
   try {
     db.run("INSERT INTO meta (key, value) VALUES ('kb_root', ?)", [source]);
     db.run("INSERT INTO meta (key, value) VALUES ('schema_version', '1')");
@@ -154,9 +156,6 @@ function buildDatabase(
     if (existsSync(abs)) rmSync(abs);
   }
 }
-
-/** The service's real schema opener, imported so fixtures cannot drift. */
-import { openStore } from "../packages/service/src/store/schema.ts";
 
 /**
  * Caller ceilings used by tests. Deliberately roomy for fixtures but finite:
@@ -872,42 +871,8 @@ describe("CLI contract", () => {
   });
 });
 
-describe("schema profile matches the service store", () => {
-  /**
-   * The profile is duplicated on purpose (the tool must run without workspace
-   * dependencies), so this test is the anti-drift gate: it builds the real
-   * store through the service's own DDL and compares pragma output column by
-   * column.
-   */
-  test("EXPORTED_SCHEMA_PROFILE equals the schema packages/service creates", () => {
-    const box = sandbox();
-    const kbRoot = join(box.root, "kb-profile");
-    mkdirSync(kbRoot, { recursive: true });
-    const db = openStore(kbRoot, { create: true });
-    try {
-      const listed = db.query("SELECT name FROM pragma_table_list WHERE schema = 'main' AND type = 'table'").all() as Array<{ name: string }>;
-      const names = listed
-        .map((row) => row.name)
-        .filter((name) => !name.startsWith("sqlite_"))
-        .sort();
-      expect(names).toEqual([...TABLE_ORDER].sort());
-      for (const table of TABLE_ORDER) {
-        const info = db.query(`PRAGMA table_info("${table}")`).all() as Array<{
-          name: string;
-          type: string;
-          notnull: number;
-          pk: number;
-        }>;
-        const actual = info.map((c) => `${c.name}:${c.type}${c.notnull ? "!" : ""}#${c.pk}`);
-        const expected = EXPORTED_SCHEMA_PROFILE[table]!.map((c) => `${c.name}:${c.type}${c.notnull ? "!" : ""}#${c.pk}`);
-        expect(actual).toEqual(expected);
-      }
-    } finally {
-      db.close();
-    }
-  });
-
-  test("KNOWN_META_KEYS is exactly the set the service writes", () => {
+describe("legacy archive constants", () => {
+  test("KNOWN_META_KEYS matches the keys written by the retired service", () => {
     // Keys written by packages/service: store/import.ts (kb_root, imported_at,
     // schema_version) and store/writes.ts (last_review_at).
     expect([...KNOWN_META_KEYS].sort()).toEqual(["imported_at", "kb_root", "last_review_at", "schema_version"]);
@@ -1164,18 +1129,12 @@ describe("F3: file-data scope, not a filesystem snapshot", () => {
   });
 });
 
-describe("profile drift against the real service schema (not a lookalike)", () => {
-  /**
-   * The exporter cannot import repo modules, so it carries a profile. This test
-   * compares that profile to what `packages/service/src/store/schema.ts` actually
-   * creates today, table by table and column by column. A schema change in the
-   * service must fail here instead of silently mismatching the export profile.
-   */
-  test("EXPORTED_SCHEMA_PROFILE matches the live store exactly", () => {
+describe("schema profile matches the frozen SQLite v1 fixture", () => {
+  test("EXPORTED_SCHEMA_PROFILE matches the original schema and user_version", () => {
     const box = sandbox();
     const kbRoot = join(box.root, "kb-live");
     mkdirSync(kbRoot, { recursive: true });
-    const db = openStore(kbRoot, { create: true });
+    const db = openLegacyFixture(kbRoot);
     try {
       const listed = db.query("SELECT name FROM pragma_table_list WHERE schema = 'main' AND type = 'table'").all() as Array<{ name: string }>;
       const names = listed
@@ -1198,8 +1157,6 @@ describe("profile drift against the real service schema (not a lookalike)", () =
         }));
         expect(live).toEqual(EXPORTED_SCHEMA_PROFILE[table] as unknown as typeof live);
       }
-      // The service also pins user_version; an exporter that accepted anything
-      // else would happily read a future schema it does not understand.
       const version = db.query<{ user_version: number }, []>("PRAGMA user_version").get();
       expect(Number(version?.user_version ?? 0)).toBe(1);
     } finally {

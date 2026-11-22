@@ -561,179 +561,158 @@ describe("--version", () => {
  * client contract: one REST request per invocation, server-rendered text, exit
  * code from the status. A real fixture KB keeps the expected claims stable.
  */
-describe("knowledge commands", () => {
-  const FIXTURE_KB = resolve(import.meta.dir, "../../../fixtures/architecture-review");
-
-  async function fixtureKb(): Promise<{ root: string; cleanup: () => Promise<void> }> {
-    const dir = await mkdtemp(join(tmpdir(), "x-sage-cli-knowledge-"));
-    await cp(FIXTURE_KB, dir, { recursive: true });
-    return { root: dir, cleanup: () => rm(dir, { recursive: true, force: true }) };
-  }
-
-  test("status reports Markdown authority before migration and structured after", async () => {
-    const kb = await fixtureKb();
+describe("public sage-db compatibility", () => {
+  test("covers the catalog, scoped metadata, graphs, concept creation and JSON proposals", async () => {
+    const requests: Array<{ method: string; target: string; body: string }> = [];
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url);
+        requests.push({ method: request.method, target: url.pathname + url.search, body: await request.text() });
+        return Response.json({ nodes: [], edges: [] }, { status: request.method === "POST" ? 201 : 200 });
+      },
+    });
+    const output = await mkdtemp(join(tmpdir(), "x-sage-graph-export-"));
     try {
-      const before = await againstServer(["knowledge", "status"], { kbRoot: kb.root });
-      expect(before.exitCode).toBe(0);
-      expect(JSON.parse(before.stdout).authority).toBe("markdown");
-
-      const imported = await againstServer(["knowledge", "import"], { kbRoot: kb.root });
-      expect({ code: imported.exitCode, err: imported.stderr }).toEqual({ code: 0, err: "" });
-      expect(imported.stdout).toContain("6 created");
-
-      const after = await againstServer(["knowledge", "status"], { kbRoot: kb.root });
-      expect(JSON.parse(after.stdout).authority).toBe("structured");
+      const args = ["--server", server.url.href];
+      const document = { frontmatter: { id: "fixture" }, body: "# Fixture" };
+      expect((await run([...args, "kb", "list"])).exitCode).toBe(0);
+      expect((await run([...args, "--kb", "sample", "meta"])).exitCode).toBe(0);
+      expect((await run([...args, "graph", "read", "--kb", "sample"])).exitCode).toBe(0);
+      const file = join(output, "graph.json");
+      expect((await run([...args, "graph", "export", file, "--semantic"])).exitCode).toBe(0);
+      expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ nodes: [], edges: [] });
+      expect((await run([...args, "concept", "create", "-", "--kb", "sample"], {}, JSON.stringify(document))).exitCode).toBe(0);
+      expect((await run([...args, "proposals", "list", "--json"])).exitCode).toBe(0);
+      expect((await run([...args, "proposals", "merge", "one", "--json"])).exitCode).toBe(0);
+      expect(requests).toEqual([
+        { method: "GET", target: "/api/knowledge-bases", body: "" },
+        { method: "GET", target: "/api/meta?kb=sample", body: "" },
+        { method: "GET", target: "/api/graph?kb=sample", body: "" },
+        { method: "GET", target: "/api/graph?semantic=true", body: "" },
+        { method: "POST", target: "/api/concepts?kb=sample", body: JSON.stringify(document) },
+        { method: "GET", target: "/api/proposals?format=json", body: "" },
+        { method: "POST", target: "/api/proposals/merge?format=json", body: '{"file":"one"}' },
+      ]);
     } finally {
-      await kb.cleanup();
+      server.stop(true);
+      await rm(output, { recursive: true, force: true });
     }
   });
 
-  test("a second import fails with the reason, so a pipeline notices", async () => {
-    const kb = await fixtureKb();
+  test("reports health and retires the old commands locally", async () => {
+    const requests: string[] = [];
+    let ready = true;
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        const path = new URL(request.url).pathname;
+        requests.push(path);
+        expect(path).toBe("/api/health");
+        return Response.json({ ok: ready, authority: "sage-db", databaseReady: ready }, { status: ready ? 200 : 503 });
+      },
+    });
     try {
-      expect((await againstServer(["knowledge", "import"], { kbRoot: kb.root })).exitCode).toBe(0);
-      const again = await againstServer(["knowledge", "import"], { kbRoot: kb.root });
-      expect(again.exitCode).toBe(1);
-      expect(again.stderr).toContain("reimport");
+      const args = ["--server", server.url.href];
+      const status = await run([...args, "status"]);
+      expect(status.exitCode).toBe(0);
+      expect(JSON.parse(status.stdout)).toMatchObject({ authority: "sage-db", databaseReady: true });
+      ready = false;
+      const unready = await run([...args, "status"]);
+      expect(unready.exitCode).toBe(1);
+      expect(JSON.parse(unready.stderr)).toMatchObject({ authority: "sage-db", databaseReady: false });
+      const retired = await run([...args, "knowledge", "import"]);
+      expect(retired.exitCode).toBe(1);
+      expect(retired.stderr).toContain("have been retired");
+      expect(requests).toEqual(["/api/health", "/api/health"]);
     } finally {
-      await kb.cleanup();
+      server.stop(true);
     }
   });
 
-  test("document prints Markdown, and --json carries the revision", async () => {
-    const kb = await fixtureKb();
+  test("explains unavailable surfaces and keeps an HTML write outcome inconclusive", async () => {
+    const requests: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        const path = new URL(request.url).pathname;
+        requests.push(path);
+        if (path.startsWith("/sage.v1.")) {
+          return new Response("<html>Workbench</html>", { headers: { "content-type": "text/html" } });
+        }
+        return new Response("Operation is not connected to x-sage-db\n", { status: 503 });
+      },
+    });
     try {
-      await againstServer(["knowledge", "import"], { kbRoot: kb.root });
-
-      const markdown = await againstServer(["knowledge", "document", "review-risk"], { kbRoot: kb.root });
-      expect({ code: markdown.exitCode, err: markdown.stderr }).toEqual({ code: 0, err: "" });
-      expect(markdown.stdout).toContain("id: review-risk");
-
-      const json = await againstServer(["knowledge", "document", "review-risk", "--json"], { kbRoot: kb.root });
-      expect({ code: json.exitCode, err: json.stderr }).toEqual({ code: 0, err: "" });
-      expect(JSON.parse(json.stdout).revision).toMatch(/^[a-f0-9]{64}$/);
+      const args = ["--server", server.url.href];
+      const checkpoint = await run([...args, "native", "checkpoint", "agent"]);
+      const handshake = await run([...args, "native", "handshake", "-"], {}, "{}");
+      const commit = await run([...args, "native", "commit", "-"], {}, "{}");
+      expect(checkpoint.exitCode).toBe(1);
+      expect(checkpoint.stderr).toContain("x-sage checkpoint read");
+      expect(handshake.exitCode).toBe(1);
+      expect(handshake.stderr).toContain("private Rust endpoint");
+      expect(commit.exitCode).toBe(2);
+      expect(commit.stderr).toContain("original request id");
+      expect(requests).toEqual([
+        "/api/knowledge/checkpoints/agent",
+        "/sage.v1.SageCommandService/Handshake", "/sage.v1.SageCommandService/CommitCommand",
+      ]);
     } finally {
-      await kb.cleanup();
-    }
-  });
-
-  test("propose → proposals → review → claims, with the payload read from a file", async () => {
-    const kb = await fixtureKb();
-    const payloadDir = await mkdtemp(join(tmpdir(), "x-sage-cli-payload-"));
-    try {
-      await againstServer(["knowledge", "import"], { kbRoot: kb.root });
-      const doc = await againstServer(["knowledge", "document", "review-premise", "--json"], { kbRoot: kb.root });
-      const revision = JSON.parse(doc.stdout).conceptRevision as string;
-
-      const payloadFile = join(payloadDir, "claim.json");
-      await writeFile(
-        payloadFile,
-        JSON.stringify({ kind: "premise", text: "3 倍流量假设未经验证", confidence: "hypothetical" }),
-      );
-
-      const proposed = await againstServer(
-        [
-          "knowledge", "propose",
-          "--kind", "claim-create",
-          "--subject", "review-premise",
-          "--expected-revision", revision,
-          "--reason", "record the capacity assumption",
-          "--author", "external-agent",
-          "--payload", payloadFile,
-          "--json",
-        ],
-        { kbRoot: kb.root },
-      );
-      expect({ code: proposed.exitCode, stderr: proposed.stderr }).toEqual({ code: 0, stderr: "" });
-      const proposal = JSON.parse(proposed.stdout) as { id: string; status: string };
-      expect(proposal.status).toBe("pending");
-
-      const listed = await againstServer(["knowledge", "proposals", "--status", "pending"], { kbRoot: kb.root });
-      expect({ out: listed.stdout, err: listed.stderr }).toEqual({ out: expect.stringContaining(proposal.id), err: "" });
-
-      const reviewed = await againstServer(
-        ["knowledge", "review", proposal.id, "--decision", "approve", "--reviewer", "arch-reviewer"],
-        { kbRoot: kb.root },
-      );
-      expect({ code: reviewed.exitCode, stderr: reviewed.stderr }).toEqual({ code: 0, stderr: "" });
-      expect(reviewed.stdout).toContain("Approved");
-
-      const claims = await againstServer(["knowledge", "claims", "review-premise"], { kbRoot: kb.root });
-      expect({ out: claims.stdout, err: claims.stderr }).toEqual({
-        out: expect.stringContaining("3 倍流量假设未经验证"),
-        err: "",
-      });
-    } finally {
-      await kb.cleanup();
-      await rm(payloadDir, { recursive: true, force: true });
-    }
-  });
-
-  test("a stale revision exits 1 and names the conflict", async () => {
-    const kb = await fixtureKb();
-    const payloadDir = await mkdtemp(join(tmpdir(), "x-sage-cli-payload-"));
-    try {
-      await againstServer(["knowledge", "import"], { kbRoot: kb.root });
-      const payloadFile = join(payloadDir, "claim.json");
-      await writeFile(payloadFile, JSON.stringify({ kind: "premise", text: "x", confidence: "confirmed" }));
-
-      const result = await againstServer(
-        [
-          "knowledge", "propose",
-          "--kind", "claim-create",
-          "--subject", "review-premise",
-          "--expected-revision", "b".repeat(64),
-          "--reason", "stale",
-          "--author", "external-agent",
-          "--payload", payloadFile,
-        ],
-        { kbRoot: kb.root },
-      );
-      expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain("Re-read");
-    } finally {
-      await kb.cleanup();
-      await rm(payloadDir, { recursive: true, force: true });
-    }
-  });
-
-  test("search prints the match basis as JSON", async () => {
-    const kb = await fixtureKb();
-    try {
-      await againstServer(["knowledge", "import"], { kbRoot: kb.root });
-      const result = await againstServer(["knowledge", "search", "延迟"], { kbRoot: kb.root });
-      expect(result.exitCode).toBe(0);
-      const payload = JSON.parse(result.stdout) as { mode: string; results: Array<{ signals: unknown[] }> };
-      expect(payload.mode).toBe("lexical");
-      expect(payload.results[0]?.signals.length).toBeGreaterThan(0);
-    } finally {
-      await kb.cleanup();
-    }
-  });
-
-  test("asset uploads an image and refuses a non-image file", async () => {
-    const kb = await fixtureKb();
-    const pngPath = join(FIXTURE_KB, "assets", "latency-chart.png");
-    const textPath = join(tmpdir(), `x-sage-not-image-${process.pid}.txt`);
-    try {
-      await againstServer(["knowledge", "import"], { kbRoot: kb.root });
-
-      const uploaded = await againstServer(["knowledge", "asset", pngPath], { kbRoot: kb.root });
-      expect(uploaded.exitCode).toBe(0);
-      expect(JSON.parse(uploaded.stdout).mediaType).toBe("image/png");
-
-      await writeFile(textPath, "not an image");
-      const refused = await againstServer(["knowledge", "asset", textPath], { kbRoot: kb.root });
-      expect(refused.exitCode).toBe(1);
-      expect(refused.stderr).toContain("Unsupported");
-    } finally {
-      await kb.cleanup();
-      await rm(textPath, { force: true });
+      server.stop(true);
     }
   });
 });
 
 describe("native commands", () => {
+  test("sends each private read and extra write to its registered path and media type", async () => {
+    const seen: Array<[string, string, string | null, string]> = [];
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url);
+        seen.push([request.method, url.pathname + url.search, request.headers.get("content-type"), await request.text()]);
+        if (request.headers.get("accept") === "application/octet-stream") {
+          return new Response("fixture bytes", { headers: { "content-type": "application/octet-stream" } });
+        }
+        if (request.method === "PUT") return new Response(null, { status: 204 });
+        return Response.json({ outcome: { committed: { recorded: {} } } });
+      },
+    });
+    try {
+      const args = ["--server", server.url.href, "native"];
+      const rpc = [
+        ["read-term-text", "ReadTermText"], ["read-term-document", "ReadTermDocument"],
+        ["read-term-activation", "ReadTermActivation"], ["read-graph-snapshot", "ReadGraphSnapshot"],
+        ["read-proposal-files", "ReadProposalFiles"], ["submit-large-body", "SubmitLargeBodyProposal"],
+        ["commit-direct-concept", "CommitDirectConcept"],
+      ] as const;
+      for (const [command] of rpc) expect((await run([...args, command, "-"], {}, "{}")).exitCode).toBe(0);
+      expect((await run([...args, "revision", "agent", "--revision", "5"])).exitCode).toBe(0);
+      expect((await run([...args, "proposals", "prp_fixture", "--preview"])).exitCode).toBe(0);
+      expect((await run([...args, "frontier"])).exitCode).toBe(0);
+      expect((await run([...args, "frontier-document", "read"])).stdout).toBe("fixture bytes");
+      expect((await run([...args, "checkpoint-document", "read", "-"], {}, "inspect")).stdout).toBe("fixture bytes");
+      expect((await run([...args, "frontier-document", "write", "-"], {}, "frontier")).exitCode).toBe(0);
+      expect((await run([...args, "checkpoint-document", "write", "-"], {}, "checkpoint")).exitCode).toBe(0);
+      expect(seen).toEqual([
+        ...rpc.map<[string, string, string, string]>(([, path], i) => [
+          "POST", "/sage.v1.SageCommandService/" + path,
+          i < 5 ? "application/json" : "application/octet-stream", "{}",
+        ]),
+        ["GET", "/api/revisions?id=agent&revision=5", null, ""],
+        ["GET", "/api/knowledge/proposals/prp_fixture?preview=true", null, ""],
+        ["GET", "/api/knowledge/frontier", null, ""],
+        ["GET", "/db/v1/frontier-document", null, ""],
+        ["POST", "/db/v1/checkpoint-document", "application/octet-stream", "inspect"],
+        ["PUT", "/db/v1/frontier-document", "application/octet-stream", "frontier"],
+        ["PUT", "/db/v1/checkpoint-document", "application/octet-stream", "checkpoint"],
+      ]);
+    } finally {
+      server.stop(true);
+    }
+  });
+
   test("forwards literal request bytes with auth over exactly one RPC", async () => {
     const raw = '{\n "envelope":{ "requestId":"q","requestId":"q2" },\n "payload":{}\n}\n';
     let requests = 0;

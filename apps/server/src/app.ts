@@ -49,25 +49,10 @@ export function createApp(options: AppOptions) {
   // remote link.
   app.use("*", compress());
 
-  // Writes are unbounded without this: a 50 MB proposal body would be parsed
-  // into memory before any validation runs.
-  //
-  // The knowledge surface gets its own, larger cap because image evidence is
-  // base64 inside a JSON envelope; the strict cap below would make every asset
-  // above ~190 KiB unreachable. Both limits are hard, and both are checked
-  // before the body is parsed.
-  const limitBody = (maxSize: number) =>
-    bodyLimit({
-      maxSize,
-      onError: (c) => c.json({ error: "Request body too large" }, 413),
-    });
-  // Hono runs every matching middleware, so the two limits cannot simply be
-  // registered in order: the general one must skip the prefix that has its own.
-  app.use(
-    "/api/*",
-    async (c, next) => (new URL(c.req.url).pathname.startsWith("/api/knowledge/") ? next() : limitBody(256 * 1024)(c, next)),
-  );
-  app.use("/api/knowledge/*", limitBody(12 * 1024 * 1024));
+  app.use("/api/*", bodyLimit({
+    maxSize: 256 * 1024,
+    onError: (c) => c.json({ error: "Request body too large" }, 413),
+  }));
 
   if (options.writeToken !== undefined) {
     const token = options.writeToken;
@@ -104,7 +89,9 @@ export function createApp(options: AppOptions) {
       if (options.nativeTermReader) {
         return c.json({ ok: false, authority: "sage-db", mode: "unverified", ...readBuildInfo() }, 503);
       }
-      return c.json({ ok: true, kb: options.kbRoot, ...readBuildInfo() });
+      const report = await handleRequest(ctx, { method: "GET", path: "/health", query: { format: "json" } });
+      const body = JSON.parse(report.body);
+      return c.json({ ok: report.status === 200, ...body, ...readBuildInfo() }, report.status === 200 ? 200 : 503);
     }
     const native = await options.nativeHealth();
     return c.json({ ...native, kb: options.kbRoot, ...readBuildInfo() }, native.ok ? 200 : 503);
@@ -145,13 +132,10 @@ export function createApp(options: AppOptions) {
     };
 
     const response = await handleRequest(ctx, request, c.req.header("accept"), options.nativeTermReader);
-    const payload = response.bytes ?? response.body;
-    return new Response(payload, {
+    return new Response(response.body, {
       status: response.status,
       headers: {
         "content-type": response.contentType,
-        // Evidence images are immutable: the URL is their content hash.
-        ...(response.bytes === undefined ? {} : { "cache-control": "private, max-age=31536000, immutable" }),
       },
     });
   });

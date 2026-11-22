@@ -37,7 +37,7 @@ export const ConceptIdSchema = z.string().regex(
 
 // target 格式：本 KB 内用 "concept-id"，跨 KB 用 "kb-id::concept-id"。
 // 语法保留跨库形式，但结构化存储一库一数据库，无法解析另一库的行：
-// 导入与结构化写入都会显式拒绝跨库目标（见 docs/knowledge-store.md）。
+// 离线导入和原生关系写入都会显式拒绝跨库目标。
 const ConceptRefSchema = z.string().regex(
   /^[a-z0-9-]+(::([a-z0-9-]+))?$/,
   'Must be "concept-id" or "kb-id::concept-id"'

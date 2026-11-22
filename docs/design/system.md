@@ -26,7 +26,7 @@ sage-db 是 Rust 实现的单节点、带来源追踪的专用知识图数据库
 | [migration.md](migration.md) | 从现有系统导入、语义差异、切换与验收 |
 | [adr-001-sage-db.md](adr-001-sage-db.md) | 本轮决策及替代旧草案的原因 |
 
-旧的 [knowledge-store.md](../knowledge-store.md) 描述当前实现，不是 sage-db 的运行规范。
+旧源库文件如需导出，走 [离线源归档](source-archive-v1.md)。
 旧文档中的 22 节点、94 断言和毫秒级数字是历史样本，不能证明新引擎的性能。
 
 ## 2. 产品边界与取舍

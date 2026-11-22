@@ -70,26 +70,13 @@
 
 最后一条是过期向量的核心验收：**改过的文本不能继续用旧嵌入参与排序**。
 
-## 如何运行
+## 夹具验证
+
+旧服务的混合检索案例是历史记录。现有夹具仍供 Rust 推理与离线迁移测试使用。
 
 ```bash
-bun test packages/service/src/store/store.test.ts      # 存储 + 检索
-bun test apps/server/src/knowledge.test.ts             # REST 契约
-bun test apps/server/src/knowledge-review.test.ts      # 独立审查发现的回归
-```
-
-也可以手动走一遍：
-
-```bash
-cp -r fixtures/architecture-review /tmp/ar && cd /tmp/ar
-# 导入
-curl -s -X POST localhost:3001/api/knowledge/import \
-  -H 'content-type: application/json' -d '{"mode":"authority"}' | jq .counts
-# 导出可编辑文档
-curl -s localhost:3001/api/knowledge/concepts/review-premise/document?format=markdown
-# 检索
-curl -s -X POST localhost:3001/api/knowledge/search \
-  -H 'content-type: application/json' -d '{"query":"延迟 约束","limit":5}' | jq '.results[] | {id, signals}'
+(cd sage-db && cargo test -p sage-db-infer --test real_kb)
+bun test tools/sage-db-source-archive.test.ts
 ```
 
 ## 案例证明了什么、没证明什么

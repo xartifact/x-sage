@@ -53,13 +53,10 @@ x-sage --server http://127.0.0.1:3001 validate --graph
 
 ## 知识库结构
 
-The authoritative store switches after an explicit import initializes
-`<kb>/knowledge.db` and records `meta.imported_at`; see `docs/knowledge-store.md`.
-
-- **Markdown authority** (default, before import): `concepts/*.md` is the source of truth.
-- **Structured authority** (after import): SQLite is the source of truth. Markdown
-  is an editing and review projection (export, edit, submit with a revision baseline).
-  Legacy write routes return 409 and identify their replacement endpoints.
+Production uses the Rust sage-db authority. The Bun service exposes REST over
+its private database connection. Markdown is used for development fixtures
+and legacy import input. The offline source archive can read retired SQLite
+databases for migration. See [source-archive-v1.md](docs/design/source-archive-v1.md).
 
 每个知识库位于 `kb/<kb-id>/`，包含：
 
@@ -102,7 +99,7 @@ triggers: [关键词A, 关键词B]
 edges:
   - type: is-a | part-of | depends-on | enables | contradicts | instantiates | analogous-to
     target: concept-id           # 本 KB 内引用
-    # target: kb-id::concept-id # Reserved syntax; rejected by the per-KB structured store.
+    # target: kb-id::concept-id # Reserved syntax; cross-KB targets are rejected.
     confidence: confirmed
 ---
 
@@ -223,9 +220,8 @@ AI 可执行的写回操作：
 
 ## 多知识库
 
-All KBs are registered in `registry.json`. The cross-KB reference syntax is
-`kb-id::concept-id`, but the structured store does not support cross-KB targets.
-Each KB has its own `knowledge.db`; imports, `relation-assert`, and `evidence-attach`
-explicitly reject cross-KB references instead of persisting unresolved edges.
-See `docs/knowledge-store.md`.
+Register Markdown KBs in `registry.json`. Production selects a native KB by its
+configured identity. The cross-KB reference syntax `kb-id::concept-id` is reserved;
+migration and native relation writes reject cross-KB targets.
+
 新建 KB：在 `kb/` 下创建目录 + `kb.json`，然后在 `registry.json` 注册。

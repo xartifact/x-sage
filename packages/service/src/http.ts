@@ -2,24 +2,14 @@
  * HTTP-shaped values shared by the dispatcher and its sub-routers.
  *
  * `ApiResponse` is transport-neutral: the server turns it into a Response and
- * the CLI writes its body to stdout. Keeping the error type and the small body
- * builders here (rather than in `api.ts`) lets the knowledge router throw the
- * same `ApiError` the main routing table maps to a status code, without a
- * circular import between the two modules.
+ * the CLI writes its body to stdout. The dispatcher maps `ApiError` to its
+ * HTTP status.
  */
 
 export interface ApiResponse {
   status: number;
   contentType: string;
   body: string;
-  /**
-   * Raw bytes for a response that is not text (an image asset).
-   *
-   * Separate from `body` because a JS string cannot carry arbitrary bytes: a
-   * latin1-decoded PNG re-encoded as UTF-8 is corrupt, and base64 in the JSON
-   * envelope would make an <img src> impossible.
-   */
-  bytes?: Uint8Array;
 }
 
 export const JSON_TYPE = "application/json; charset=utf-8";
@@ -44,8 +34,4 @@ export function json(status: number, value: unknown): ApiResponse {
 
 export function text(status: number, body: string, contentType = TEXT_TYPE): ApiResponse {
   return { status, contentType, body };
-}
-
-export function binary(status: number, bytes: Uint8Array, contentType: string): ApiResponse {
-  return { status, contentType, body: "", bytes };
 }

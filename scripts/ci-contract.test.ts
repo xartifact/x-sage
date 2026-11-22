@@ -151,11 +151,13 @@ describe("build identity wiring", () => {
     expect(health).toContain("readBuildInfo");
   });
 
-  test("CLI has no local mode", async () => {
-    // Every client goes through the REST API; a filesystem path would let the
-    // CLI bypass the server and read a KB the deployment does not serve.
+  test("CLI scopes REST by KB id and isolates offline administration", async () => {
     const cli = await read("apps/cli/src/index.ts");
-    expect(cli).not.toContain("--kb");
+    const remote = cli.slice(cli.indexOf("async function runRemote"), cli.indexOf("async function runAdmin"));
+    expect(remote).toContain("url.searchParams.set");
+    expect(remote).not.toContain("Bun.file");
+    expect(cli).toContain("invocation.query.kb = kbFlag");
+    expect(cli).toContain('if (command === "admin")');
     expect(cli).not.toContain("X_SAGE_KB");
     expect(cli).not.toContain("handleRequest");
   });
