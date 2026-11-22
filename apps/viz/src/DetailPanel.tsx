@@ -3,7 +3,7 @@ import { X, Pencil, ArrowRight, ArrowLeft, ArrowLeftRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { LAYER_LABELS, EDGE_LABELS } from "./types";
+import { conceptName, LAYER_LABELS, EDGE_LABELS } from "./types";
 import type { GraphNode, GraphEdge } from "./types";
 
 interface DetailPanelProps {
@@ -13,10 +13,6 @@ interface DetailPanelProps {
   onClose: () => void;
   onSelect?: (id: string) => void;
   onEdit?: (id: string) => void;
-}
-
-function name(node: GraphNode): string {
-  return node.molecule.match(/^#\s+(.+)$/m)?.[1]?.trim() || node.id;
 }
 
 export default function DetailPanel({
@@ -47,12 +43,12 @@ export default function DetailPanel({
   return (
     <aside
       aria-label="概念详情"
-      className="flex h-full min-h-0 flex-col bg-background"
+      className="sage-detail"
     >
-      <header className="flex items-start gap-2 border-b p-4">
+      <header className="sage-detail-header">
         <div className="min-w-0 flex-1">
-          <h2 className="break-words text-base font-semibold leading-relaxed">
-            {name(node)}
+          <h2 className="sage-detail-title">
+            {conceptName(node)}
           </h2>
           <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
             {node.id}
@@ -67,14 +63,14 @@ export default function DetailPanel({
           <X className="size-4" />
         </Button>
       </header>
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+      <div className="sage-detail-scroll space-y-5">
         <section className="space-y-3">
           <div className="flex flex-wrap gap-1.5">
             <Badge variant="secondary">{LAYER_LABELS[node.layer]}</Badge>
             <Badge variant="outline">{node.confidence}</Badge>
             <Badge variant="outline">{node.source}</Badge>
           </div>
-          <p className="text-sm leading-7">{node.atom}</p>
+          <p className="sage-atom">{node.atom}</p>
           {onEdit && (
             <Button variant="outline" size="sm" onClick={() => onEdit(node.id)}>
               <Pencil className="size-3.5" />
@@ -84,7 +80,7 @@ export default function DetailPanel({
         </section>
         <Separator />
         <section className="space-y-3">
-          <h3 className="text-xs font-medium text-muted-foreground">
+          <h3 className="text-sm font-semibold">
             领域与触发词
           </h3>
           <div className="flex flex-wrap gap-1.5">
@@ -102,7 +98,7 @@ export default function DetailPanel({
         </section>
         <Separator />
         <section className="space-y-2">
-          <h3 className="text-xs font-medium text-muted-foreground">
+          <h3 className="text-sm font-semibold">
             关联概念 · {links.length}
           </h3>
           {links.length === 0 && (
@@ -135,7 +131,7 @@ export default function DetailPanel({
                     {EDGE_LABELS[edge.type]}
                   </span>
                   <span className="block break-words text-sm">
-                    {target ? name(target) : other}
+                    {target ? conceptName(target) : other}
                   </span>
                 </span>
               </Button>
@@ -144,7 +140,7 @@ export default function DetailPanel({
         </section>
         <Separator />
         <section className="space-y-3">
-          <h3 className="text-xs font-medium text-muted-foreground">
+          <h3 className="text-sm font-semibold">
             完整概念
           </h3>
           <MarkdownContent content={node.molecule} />

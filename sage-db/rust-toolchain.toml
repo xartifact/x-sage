@@ -1,0 +1,8 @@
+# 固定工具链，保证本地与 CI 用同一个 rustc/clippy/rustfmt。
+# 这是仓库内配置，不修改任何全局 rustup 默认值。
+# scripts/ci.sh 会断言 `rustc --version` 与本文件的 channel 一致；
+# 若非 rustup 管理的 cargo，本文件会被忽略，断言随即失败。
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

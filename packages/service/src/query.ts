@@ -85,16 +85,25 @@ export async function activate(
   options: ActivateOptions = {},
 ): Promise<Activation> {
   const asserted = await buildGraph(ctx);
-  const semantic = semanticGraph(asserted);
-
-  const node = asserted.nodes.find((candidate) => candidate.id === conceptId);
-  if (!node) {
-    throw new Error(`Concept not found: ${conceptId}`);
-  }
-
   const concept = await findConceptFile(ctx, conceptId);
   const raw = await readConceptRaw(ctx, conceptId);
+  return activateInGraph(asserted, conceptId, {
+    raw,
+    molecule: concept.file.molecule,
+    triggers: concept.file.frontmatter.triggers,
+  }, options);
+}
 
+/** Activation traversal over authored graph and current document data. */
+export function activateInGraph(
+  asserted: Graph,
+  conceptId: string,
+  content: Pick<Activation, "raw" | "molecule" | "triggers">,
+  options: ActivateOptions,
+): Activation {
+  const node = asserted.nodes.find((candidate) => candidate.id === conceptId);
+  if (!node) throw new Error(`Concept not found: ${conceptId}`);
+  const semantic = semanticGraph(asserted);
   let visited: string[];
   let depth: number;
   if (options.strategy) {
@@ -124,9 +133,7 @@ export async function activate(
     concept: conceptId,
     strategy: options.strategy ?? null,
     depth,
-    raw,
-    molecule: concept.file.molecule,
-    triggers: concept.file.frontmatter.triggers,
+    ...content,
     node,
     directEdges: sub.edges,
     requires: targetsOf(semantic, conceptId, "depends-on"),
@@ -152,7 +159,11 @@ export interface PathResult {
 
 /** Shortest undirected path between two concepts. */
 export async function findPath(ctx: KbContext, fromId: string, toId: string): Promise<PathResult> {
-  const graph = await buildGraph(ctx);
+  return pathInGraph(await buildGraph(ctx), fromId, toId);
+}
+
+/** Shortest undirected path over one asserted graph. */
+export function pathInGraph(graph: Graph, fromId: string, toId: string): PathResult {
   const path = shortestPath(graph, fromId, toId) ?? [];
   const nodes = path
     .map((id) => graph.nodes.find((node) => node.id === id))

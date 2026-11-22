@@ -158,7 +158,7 @@ export function renderPath(result: PathResult): string {
 }
 
 /** `viz stats` summary plus the meta block. */
-export function renderVizStats(payload: VizPayload): string {
+export function renderVizStats(payload: Pick<VizPayload, "meta" | "edges">): string {
   const { meta } = payload;
   return (
     [

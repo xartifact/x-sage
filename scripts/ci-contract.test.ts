@@ -400,3 +400,216 @@ describe("client install", () => {
     expect(await installer()).toContain("comes first on PATH");
   });
 });
+
+describe("sage-db gate", () => {
+  test("the Rust gate is mandatory, never conditional", async () => {
+    // A workspace-optional gate stops being a gate the first time someone
+    // deletes the directory to "unblock" CI.
+    const script = await read("scripts/ci.sh");
+    expect(script).toContain("workspace present");
+    expect(script).toContain("is missing; the Rust gate is mandatory");
+    expect(script).toContain("the toolchain pin is mandatory");
+    expect(script).not.toMatch(/if \[ -f sage-db\/Cargo\.toml \]/);
+  });
+
+  test("each Rust step can fail and aborts the script", async () => {
+    const script = await read("scripts/ci.sh");
+    expect(script).toContain("sage-db: fmt");
+    expect(script).toContain("cargo fmt --all -- --check");
+    expect(script).toContain("cargo clippy --workspace --all-targets --locked -- -D warnings");
+    expect(script).toContain("cargo test --workspace --locked");
+    // `set -euo pipefail` plus per-step subshells means a failing step exits.
+    expect(script).toContain("set -euo pipefail");
+    expect(script).toContain("( cd sage-db && cargo test --workspace --locked )");
+  });
+
+  test("a failing cargo tree cannot pass the dependency gate", async () => {
+    // `if pipeline; then` swallows the pipeline's exit status, so a broken
+    // manifest or a missing crate used to look like "no forbidden edge".
+    const script = await read("scripts/ci.sh");
+    const gate = script.slice(
+      script.indexOf("check_no_edge()"),
+      script.indexOf("echo \"==> all gates passed\""),
+    );
+    expect(gate).toContain("cargo tree failed for");
+    expect(gate).toMatch(/if ! \( cd sage-db && cargo tree/);
+    expect(gate).toContain("exit 1");
+    // Content check runs only after the tree command succeeded.
+    expect(gate.indexOf("cargo tree failed")).toBeLessThan(gate.indexOf("must not depend on"));
+  });
+
+  test("dependency gate covers dev and build edges where they matter", async () => {
+    const script = await read("scripts/ci.sh");
+    // reference must not reach infer through *any* edge kind.
+    expect(script).toContain("check_no_edge sage-db-reference sage-db-infer normal,build,dev");
+    // infer may dev-depend on reference, but not in production or build.
+    expect(script).toContain("check_no_edge sage-db-infer sage-db-reference normal,build");
+    // types must stay dependency-free.
+    expect(script).toContain("check_no_edge sage-db-types sage-db-infer");
+    expect(script).toContain("check_no_edge sage-db-types sage-db-reference");
+  });
+
+  test("the store's direct allowlist is an exact set, not a subset check", async () => {
+    const script = await read("scripts/ci.sh");
+    // The gate must compare the DIRECT normal dependency set against a fixed list, so an
+    // unapproved dependency fails even when no forbidden edge exists. A "subset" or
+    // "no forbidden name" formulation would pass for a brand-new undeclared crate.
+    expect(script).toContain("check_direct_allowlist()");
+    expect(script).toContain(
+      "check_direct_allowlist sage-db-store sage-db-types sage-db-format cap-std triomphe",
+    );
+    const gate = script.slice(
+      script.indexOf("check_direct_allowlist()"),
+      script.indexOf("check_no_edge sage-db-format sage-db-infer"),
+    );
+    // Equality, both directions: extra and missing dependencies both fail.
+    expect(gate).toContain('if [ "$actual" != "$expected" ]');
+    expect(gate).toContain("direct dependencies changed");
+    // Normal edges only, and depth 1, so the name is honest about its scope.
+    expect(gate).toContain("--edges normal --depth 1");
+  });
+
+  test("the allowlist gate fails closed when cargo tree fails", async () => {
+    const script = await read("scripts/ci.sh");
+    const gate = script.slice(
+      script.indexOf("check_direct_allowlist()"),
+      script.indexOf("check_no_edge sage-db-format sage-db-infer"),
+    );
+    // A broken manifest or renamed crate must not read as "allowlist satisfied".
+    expect(gate).toContain("cannot verify direct dependencies");
+    expect(gate).toMatch(/if ! \( cd sage-db && cargo tree/);
+    expect(gate).toContain("exit 1");
+    expect(gate.indexOf("cannot verify direct dependencies")).toBeLessThan(
+      gate.indexOf('if [ "$actual" != "$expected" ]'),
+    );
+  });
+
+  test("store cannot reach infer or the harness through any edge", async () => {
+    const script = await read("scripts/ci.sh");
+    // Storage performs no inference.
+    expect(script).toContain(
+      "check_no_edge sage-db-store sage-db-infer normal,build,dev",
+    );
+    // The independent oracle must never be reachable from production code, including
+    // through a dev-dependency (which is how it would sneak into `cargo test`).
+    expect(script).toContain(
+      "check_no_edge sage-db-store sage-db-store-tests normal,build,dev",
+    );
+    // format is the lower layer: it must not depend on store or infer.
+    expect(script).toContain("check_no_edge sage-db-format sage-db-store normal,build,dev");
+    expect(script).toContain("check_no_edge sage-db-format sage-db-infer normal,build,dev");
+  });
+
+  test("the kernel graph admission uses canonical types, Store and infer", async () => {
+    const script = await read("scripts/ci.sh");
+    expect(script).toContain("check_direct_allowlist sage-db-kernel sage-db-types sage-db-store sage-db-infer");
+    const manifest = await read("sage-db/crates/kernel/Cargo.toml");
+    const production = manifest.split("[dependencies]")[1]?.split("[dev-dependencies]")[0];
+    expect(production?.trim()).toBe("sage-db-types.workspace = true\nsage-db-store.workspace = true\n# Canonical graph admission, authorized by system.md section 3.\nsage-db-infer.workspace = true");
+  });
+
+  test("server commands use canonical grants, protocol and Store with approved mature crypto", async () => {
+    const script = await read("scripts/ci.sh");
+    expect(script).toContain("check_direct_allowlist sage-db-server sage-db-types sage-db-kernel sage-db-store sage-db-protocol sha2 subtle httparse serde serde_json sage-db-query regex-syntax chrono");
+    expect(script).toContain("check_no_edge sage-db-server sage-db-store-tests normal,build,dev");
+    const manifest = await read("sage-db/crates/server/Cargo.toml");
+    expect(manifest).toContain('sha2 = "0.10.9"');
+    expect(manifest).toContain('subtle = { version = "2.6.1", default-features = false }');
+  });
+
+  test("ci.sh asserts the pinned toolchain actually took effect", async () => {
+    const script = await read("scripts/ci.sh");
+    expect(script).toContain("sage-db/rust-toolchain.toml");
+    expect(script).toContain("does not match pinned");
+    const pin = await read("sage-db/rust-toolchain.toml");
+    expect(pin).toContain("1.98.1");
+    expect(pin).toContain('components = ["rustfmt", "clippy"]');
+  });
+
+  test("the workflow installs the pinned toolchain before the gates", async () => {
+    const workflow = await read(".github/workflows/docker-build.yml");
+    const testJob = workflow.slice(workflow.indexOf("  test:"), workflow.indexOf("  build:"));
+    const install = testJob.indexOf("Install pinned Rust toolchain");
+    const gates = testJob.indexOf("./scripts/ci.sh");
+    expect(install).toBeGreaterThan(-1);
+    expect(gates).toBeGreaterThan(install);
+    expect(testJob).toContain("rustup toolchain install");
+    expect(testJob).not.toContain("continue-on-error");
+  });
+
+  test("reference depends only on types, infer only dev-depends on reference", async () => {
+    // The manifest is the structural guarantee that the reference executor
+    // cannot call optimized helpers to compute its "expected" answer.
+    const reference = await read("sage-db/crates/reference/Cargo.toml");
+    const infer = await read("sage-db/crates/infer/Cargo.toml");
+    const types = await read("sage-db/crates/types/Cargo.toml");
+
+    expect(reference).toContain("sage-db-types");
+    expect(reference).not.toContain("sage-db-infer");
+    expect(reference).not.toContain("dev-dependencies");
+
+    expect(types).not.toContain("dependencies]");
+
+    const inferDeps = infer.slice(infer.indexOf("[dependencies]"));
+    expect(inferDeps).toContain("sage-db-types");
+    expect(inferDeps).toContain("[dev-dependencies]");
+    const production = inferDeps.slice(
+      inferDeps.indexOf("[dependencies]"),
+      inferDeps.indexOf("[dev-dependencies]"),
+    );
+    expect(production).not.toContain("sage-db-reference");
+  });
+
+  test("the workspace keeps build output out of version control", async () => {
+    const ignore = await read("sage-db/.gitignore");
+    expect(ignore).toContain("/target");
+  });
+
+  test("docs keep the Rust scope marks and no SQLite backend", async () => {
+    // A regression guard for the approved direction: sage-db is self-developed,
+    // and the design docs must not drift back to describing a SQLite engine.
+    const system = await read("docs/design/system.md");
+    expect(system).toContain("sage-db");
+    expect(system).toContain("不依赖 SQLite");
+    const adr = await read("docs/design/adr-001-sage-db.md");
+    expect(adr).toContain("不采用");
+  });
+});
+
+describe("sage-db protocol and query dependency boundaries", () => {
+  test("protocol and query have explicit production allowlists and cannot reach storage/business", async () => {
+    const ci = await read("scripts/ci.sh");
+    expect(ci).toContain("check_direct_allowlist sage-db-protocol sage-db-types prost pbjson pbjson-types serde serde_json");
+    expect(ci).toContain("check_direct_allowlist sage-db-query sage-db-types sage-db-infer");
+    for (const target of ["sage-db-store", "sage-db-kernel"]) {
+      expect(ci).toContain(`check_no_edge sage-db-protocol ${target} normal,build,dev`);
+      expect(ci).toContain(`check_no_edge sage-db-query ${target} normal,build`);
+    }
+  });
+});
+
+describe("sage-db reproducible protocol generation", () => {
+  test("CI provisions pinned generators and drift checking is a required gate", async () => {
+    const workflow = await read(".github/workflows/docker-build.yml");
+    const job = workflow.slice(workflow.indexOf("  test:"), workflow.indexOf("  build:"));
+    expect(job).toContain('setup-sage-db-codegen.sh "$RUNNER_TEMP/sage-codegen"');
+    expect(job.indexOf("Install pinned protocol generators")).toBeLessThan(job.indexOf("Quality gates + tests"));
+    expect(await read("scripts/ci.sh")).toContain("bun tools/generate-sage-db-protocol.ts --check");
+    const pkg = JSON.parse(await read("tools/protocol-codegen/package.json"));
+    expect(pkg.dependencies["ts-proto"]).toBe("2.6.1");
+  });
+});
+
+
+describe("sage-db administrative import dependency direction", () => {
+  test("import tooling cannot be reached from serving and canonical crates", async () => {
+    const ci = await read("scripts/ci.sh");
+    expect(ci).toContain("check_direct_allowlist sage-db-migrate sage-db-types sage-db-format sage-db-store sage-db-kernel serde serde_json");
+    expect(ci).toContain("for canonical in sage-db-types sage-db-format sage-db-store sage-db-kernel sage-db-infer sage-db-reference sage-db-query sage-db-protocol sage-db-server; do");
+    expect(ci).toContain('check_no_edge "$canonical" sage-db-migrate normal,build,dev');
+    const manifest = await read("sage-db/crates/migrate/Cargo.toml");
+    const production = manifest.split("[dependencies]")[1]?.split("[dev-dependencies]")[0];
+    expect(production).not.toContain("sage-db-store-tests");
+    expect(manifest.split("[dev-dependencies]")[1]?.trim()).toBe("sage-db-store-tests.workspace = true");
+  });
+});

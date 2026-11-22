@@ -3,14 +3,18 @@ import { cors } from "hono/cors";
 import { compress } from "hono/compress";
 import { timingSafeEqual } from "node:crypto";
 import { bodyLimit } from "hono/body-limit";
-import { handleRequest, type ApiMethod, type ApiRequest } from "@x-sage/service";
+import { handleRequest, type ApiMethod, type ApiRequest, type NativeTermReader } from "@x-sage/service";
 import { kb, type KbContext, wantsText } from "@x-sage/service";
 import { readBuildInfo } from "./build-info.ts";
+import type { NativeHealth } from "./native-startup.ts";
 
 export interface AppOptions {
   /** Absolute path to the KB directory. */
   kbRoot: string;
   registryPath?: string | undefined;
+  /** Isolated, partial database integration. Unwired operations are refused. */
+  nativeTermReader?: NativeTermReader;
+  nativeHealth?: () => Promise<NativeHealth>;
   /** Origin allowed to call the API; defaults to any, which suits local dev. */
   corsOrigin?: string;
   /**
@@ -95,7 +99,16 @@ export function createApp(options: AppOptions) {
     });
   }
 
-  app.get("/api/health", (c) => c.json({ ok: true, kb: options.kbRoot, ...readBuildInfo() }));
+  app.get("/api/health", async (c) => {
+    if (!options.nativeHealth) {
+      if (options.nativeTermReader) {
+        return c.json({ ok: false, authority: "sage-db", mode: "unverified", ...readBuildInfo() }, 503);
+      }
+      return c.json({ ok: true, kb: options.kbRoot, ...readBuildInfo() });
+    }
+    const native = await options.nativeHealth();
+    return c.json({ ...native, kb: options.kbRoot, ...readBuildInfo() }, native.ok ? 200 : 503);
+  });
 
   // Every other /api route goes through the dispatcher. Registering one handler
   // for the whole prefix keeps the routing table in exactly one place.
@@ -131,7 +144,7 @@ export function createApp(options: AppOptions) {
       ...(body === undefined ? {} : { body }),
     };
 
-    const response = await handleRequest(ctx, request, c.req.header("accept"));
+    const response = await handleRequest(ctx, request, c.req.header("accept"), options.nativeTermReader);
     const payload = response.bytes ?? response.body;
     return new Response(payload, {
       status: response.status,

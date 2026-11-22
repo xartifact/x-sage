@@ -195,10 +195,55 @@ curl -fsSL "https://raw.githubusercontent.com/xartifact/x-sage/$COMMIT/skills/x-
 | [docs/knowledge-store.md](docs/knowledge-store.md) | 结构化权威：迁移、断言、证据、向量、审阅冲突 |
 | [docs/architecture-review-case.md](docs/architecture-review-case.md) | 架构审查固定案例与期望检索结果 |
 
+## 设计文档（自研知识图数据库 sage-db）
+
+从 [docs/design/system.md](docs/design/system.md) 开始。自研方向已确认，以下是待实现的
+设计契约；当前运行时仍以上方“结构化权威”文档为准。
+
+| 文档 | 内容 |
+|---|---|
+| [docs/design/system.md](docs/design/system.md) | 自研范围、crate 边界、不变量、P0–P5 验收与容量基准 |
+| [docs/design/data-model.md](docs/design/data-model.md) | 完整记录、身份与修订、证据生命周期、layer 与定义深度 |
+| [docs/design/inference.md](docs/design/inference.md) | 最宽路径、提交前校验、按需缓存、证明与工作预算 |
+| [docs/design/storage.md](docs/design/storage.md) | 自研事务段、CURRENT 提交、崩溃恢复、blobs、备份与 GC |
+| [docs/design/query-dsl.md](docs/design/query-dsl.md) | 固定动词、结果完整性、确定性排序、流式与混合检索 |
+| [docs/design/server.md](docs/design/server.md) | 请求隔离、持久提案、幂等、认证、背压与运维 |
+| [docs/design/migration.md](docs/design/migration.md) | 全对象迁移、规则差异、切换状态机与反例验收 |
+| [docs/design/adr-001-sage-db.md](docs/design/adr-001-sage-db.md) | 自研决策、旧草案修订追踪及 v1 延期范围 |
+| [docs/design/axiomatics.md](docs/design/axiomatics.md) | 注解载体、封闭规则、未知语义、权威断言不可自动归约 |
+
+### sage-db Rust workspace
+
+P0 语义层已实现并通过验收：参考求值器（T4）与优化求值器（T5）均已交付实现。
+以下描述的是**已实现的内存语义层**；持久化、服务与迁移（P1–P5）尚未开始。
+workspace 位于 `sage-db/`，crate 统一 `sage-db-*` 前缀：
+
+| crate | 职责 | 依赖 |
+|---|---|---|
+| `sage-db-types` | 身份、记录、规则模板、预算、基础图输入、结果与证明词汇 | 无第三方依赖 |
+| `sage-db-infer` | 优化求值器（P0 已通过验收） | types；reference 仅 dev-dependency |
+| `sage-db-reference` | 朴素参考求值器与差分 oracle（P0 已通过验收） | 仅 types |
+
+`sage-db-reference` 不依赖 `sage-db-infer`：这是“两套独立算法”的结构保证，由
+`scripts/ci.sh` 的 `cargo tree` 断言（reference 查 `normal,build,dev`；infer 查
+`normal,build`；types 查 `normal,build,dev`），不是靠约定。
+
+```bash
+cd sage-db
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+```
+
+工具链由 `sage-db/rust-toolchain.toml` 固定（1.98.1，含 rustfmt/clippy），不改动任何
+全局 rustup 配置。根 `./scripts/ci.sh` 在 TS 门之后串行执行上述 Rust 门，并断言
+`rustc --version` 与该 pin 一致。Rust 门是必过门：缺 `sage-db/Cargo.toml` 或
+`sage-db/rust-toolchain.toml` 立即失败，不会跳过或静默“通过”。
+
 ## 验证
 
 ```bash
-./scripts/ci.sh      # typecheck + 契约测试 + 全部测试 + KB 校验
+./scripts/ci.sh      # typecheck + 契约测试 + 全部测试 + KB 校验 + Rust 门
 bun run typecheck
 bun test
 ```

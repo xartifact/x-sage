@@ -27,13 +27,7 @@ export default function FilterControls({
   onToggleEdgeType,
 }: FilterControlsProps) {
   return (
-    <section aria-label="图谱筛选" className="space-y-5 p-4">
-      <div>
-        <h2 className="text-sm font-semibold">图谱筛选</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          按层级与关系组织当前视图
-        </p>
-      </div>
+    <section aria-label="图谱筛选" className="sage-filter-groups">
       <fieldset className="space-y-1">
         <legend className="mb-2 text-xs font-medium text-muted-foreground">
           概念层级

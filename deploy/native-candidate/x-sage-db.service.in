@@ -1,0 +1,19 @@
+[Unit]
+Description=x-sage-db on the qualified operator-owned Btrfs root
+
+[Service]
+Type=exec
+EnvironmentFile=%h/.config/x-sage-db/database.env
+Environment=SAGE_DB_LISTEN=127.0.0.1:3901
+Environment=SAGE_DB_CREDENTIALS=%h/.config/x-sage-db/credentials.tsv
+ExecStartPre=/usr/bin/sha256sum --check --strict %h/.config/x-sage-db/server.sha256
+ExecStart=%h/.local/share/x-sage-db/current/sage-db-server
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

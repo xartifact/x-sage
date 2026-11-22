@@ -55,10 +55,15 @@ import { cn } from "@/lib/utils";
 import { api, ApiError } from "./api";
 import { EDGE_TYPES, EDGE_LABELS } from "./types";
 import OperationResult from "./OperationResult";
+import {
+  NativeWriter, checkpointCommand, createTermCommand, frontierCommand, readCheckpoint, readTerm, relationSubmission, reviewProposal, textSubmission,
+  type NativeCheckpoint, type NativePreview, type NativeProposal, type NativeTerm,
+} from "./nativeCommands";
 
 interface Props {
   kb: string;
   ids: string[];
+  readToken: string;
   onChange: () => void;
   onClose: () => void;
   initialConceptId?: string;
@@ -69,6 +74,7 @@ interface Proposal {
   conceptId?: string;
   from?: string;
   target?: string;
+  canPreview?: boolean;
 }
 interface Frontier {
   id: string;
@@ -184,6 +190,7 @@ function Choice({
 export default function Workbench({
   kb,
   ids,
+  readToken,
   onChange,
   onClose,
   initialConceptId,
@@ -194,6 +201,14 @@ export default function Workbench({
     [error, setError] = useState(""),
     [result, setResult] = useState<unknown>(null),
     [dirty, setDirty] = useState(false);
+  const [engine, setEngine] = useState<"legacy" | "native" | null>(null);
+  const [baseline, setBaseline] = useState<NativeTerm | null>(null);
+  const [proposalDetail, setProposalDetail] = useState<NativePreview | null>(null);
+  const [reviewNote, setReviewNote] = useState("");
+  const [writer] = useState(() => new NativeWriter());
+  const [pending, setPending] = useState(false);
+  const [pendingReview, setPendingReview] = useState<"approve" | "reject" | null>(null);
+  const native = engine === "native";
   const [id, setId] = useState(
     initialConceptId && ids.includes(initialConceptId)
       ? initialConceptId
@@ -210,6 +225,7 @@ export default function Workbench({
     [body, setBody] = useState(""),
     [revision, setRevision] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [checkpoint, setCheckpoint] = useState<NativeCheckpoint | null>(null);
   const [proposals, setProposals] = useState<Proposal[]>([]),
     [listLoaded, setListLoaded] = useState(false),
     [file, setFile] = useState(""),
@@ -230,21 +246,35 @@ export default function Workbench({
     };
   }, []);
   useEffect(() => {
+    const request = new AbortController();
+    api("", "/health", "GET", undefined, "", request.signal).then(
+      (data) => {
+        if (!request.signal.aborted) setEngine(data.engine === "sage-db" ? "native" : "legacy");
+      },
+      () => {
+        if (!request.signal.aborted) setError("暂时无法确认服务版本。请关闭后重新打开。");
+      },
+    );
+    return () => request.abort();
+  }, []);
+  useEffect(() => {
     if (!ids.includes(id) && !dirty && !busy) {
       setId(ids[0] ?? "");
       setBody("");
       setRevision("");
       setSnapshot(null);
+      setCheckpoint(null);
+      setBaseline(null);
     }
   }, [ids, id, dirty, busy]);
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty && !pending) return;
     const guard = (event: BeforeUnloadEvent) => {
       event.preventDefault();
     };
     window.addEventListener("beforeunload", guard);
     return () => window.removeEventListener("beforeunload", guard);
-  }, [dirty]);
+  }, [dirty, pending]);
   function ask(title: string, description: string, action = "继续") {
     return new Promise<boolean>((resolve) => {
       confirmationResolve.current = resolve;
@@ -277,36 +307,33 @@ export default function Workbench({
     setBody("");
     setRevision("");
     setSnapshot(null);
+    setCheckpoint(null);
+    setBaseline(null);
     setDirty(false);
     setResult(null);
     setError("");
   }
   async function navigate(next: string) {
-    if (next === tab || busy || confirmation) return;
+    if (next === tab || busy || pending || confirmation) return;
     if (await discard()) {
       resetEditor();
       setTab(next);
     }
   }
   async function close() {
-    if (busy || confirmation) return;
+    if (busy || pending || confirmation) return;
     if (await discard()) onClose();
   }
-  async function run(
-    path: string,
-    method = "GET",
-    value?: unknown,
-    showResult = true,
-  ) {
+  async function operate<T>(operation: () => Promise<T>, write = false, showResult = true) {
     if (inFlight.current) return null;
     inFlight.current = true;
     setBusy(true);
     setError("");
     try {
-      const data = await api(kb, path, method, value, token);
+      const data = await operation();
       if (!alive.current) return null;
       if (showResult) setResult(data);
-      if (method !== "GET") {
+      if (write) {
         onChange();
         setDirty(false);
       }
@@ -319,8 +346,51 @@ export default function Workbench({
       return null;
     } finally {
       inFlight.current = false;
-      if (alive.current) setBusy(false);
+      if (alive.current) {
+        setBusy(false);
+        setPending(writer.hasPending);
+      }
     }
+  }
+
+  function run(path: string, method = "GET", value?: unknown, showResult = true) {
+    const credential = method === "GET" && native ? readToken : token;
+    return operate(() => api(kb, path, method, value, credential), method !== "GET", showResult);
+  }
+
+  async function loadText() {
+    if (pending || !(await discard())) return;
+    if (native) {
+      const data = await operate(() => readTerm(kb, id, readToken), false, false);
+      if (!data) return;
+      setBaseline(data);
+      setBody(data.body);
+      setRevision(data.revision);
+      setFields((old) => ({ ...old, atom: data.atom }));
+    } else {
+      const data = await run(`/concepts/${encodeURIComponent(id)}/body`, "GET", undefined, false);
+      if (!data) return;
+      setBody(data.body);
+      setRevision(data.revision);
+    }
+    setDirty(false);
+  }
+
+  function submitNative() {
+    return operate(() => writer.write("SubmitProposal",
+      JSON.stringify([kb, id, kind, body, fields.atom, fields.target, fields.type, fields.reason]),
+      token,
+      async () => {
+        if (kind === "edge") {
+          const from = await readTerm(kb, id, readToken);
+          const target = await readTerm(kb, fields.target ?? "", readToken);
+          return relationSubmission(from, target, fields.type ?? "", fields.reason ?? "");
+        }
+        if (!baseline || baseline.conceptId !== id || (kind !== "atom" && kind !== "body")) {
+          throw new Error("请先读取当前内容，建立修订基线。");
+        }
+        return textSubmission(baseline, kind, kind === "atom" ? fields.atom ?? "" : body);
+      }), true);
   }
   function change(name: string, value: string) {
     setFields((old) => ({ ...old, [name]: value }));
@@ -369,7 +439,7 @@ export default function Workbench({
     <Choice
       label="概念"
       value={id}
-      disabled={busy}
+      disabled={busy || pending}
       options={ids.map((value) => ({ value, label: value }))}
       onChange={async (next) => {
         if (await discard()) {
@@ -394,16 +464,33 @@ export default function Workbench({
   async function loadProposals() {
     const data = await run("/proposals", "GET", undefined, false);
     if (data) {
-      setProposals([...data.edges, ...data.atoms, ...data.bodies]);
+      setProposals(native
+        ? (data.proposals as NativeProposal[]).map((entry) => ({
+            file: entry.id, status: entry.status, conceptId: entry.subject,
+            canPreview: !entry.legacyId && ["concept-markdown", "relation-assert", "term-create"].includes(entry.kind),
+          }))
+        : [...data.edges, ...data.atoms, ...data.bodies]);
       setListLoaded(true);
     }
   }
   async function inspect(name: string) {
     setFile(name);
     setReviewed("");
-    const data = await run(`/proposals/${encodeURIComponent(name)}`);
-    if (data?.proposal?.status === "pending" && data.applies !== false)
-      setReviewed(name);
+    setProposalDetail(null);
+    setReviewNote("");
+    const item = proposals.find((proposal) => proposal.file === name);
+    const path = `/proposals/${encodeURIComponent(name)}`;
+    if (native && item?.canPreview) {
+      setResult(null);
+      const data = await run(path + "?preview=true", "GET", undefined, false);
+      if (data?.proposal?.id === name && data.preview && data.proposal.status === "pending") {
+        setProposalDetail(data);
+        setReviewed(name);
+      }
+    } else {
+      const data = await run(path);
+      if (!native && data?.proposal?.status === "pending" && data.applies !== false) setReviewed(name);
+    }
   }
   return (
     <>
@@ -414,7 +501,7 @@ export default function Workbench({
         }}
       >
         <DialogContent
-          className="flex max-h-[92dvh] w-[calc(100%-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[880px]"
+          className="sage-maintenance flex flex-col gap-0 overflow-hidden p-0"
           onEscapeKeyDown={(e) => {
             if (busy || confirmation) e.preventDefault();
           }}
@@ -422,7 +509,7 @@ export default function Workbench({
             e.preventDefault();
           }}
         >
-          <DialogHeader className="border-b px-6 py-5 pr-12">
+          <DialogHeader className="sage-maintenance-header">
             <DialogTitle className="flex items-center gap-2">
               维护知识库{" "}
               <Badge
@@ -432,14 +519,14 @@ export default function Workbench({
                 {kb}
               </Badge>
             </DialogTitle>
-            <DialogDescription>
-              创建、修订和审阅知识。变更只应用于当前知识库。
+            <DialogDescription className="sr-only">
+              知识库 {kb} 的写回操作。
             </DialogDescription>
           </DialogHeader>
-          <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+          <div className="sage-maintenance-layout">
             <nav
               aria-label="知识维护操作"
-              className="flex shrink-0 gap-1 overflow-x-auto border-b bg-muted/30 p-3 sm:w-40 sm:flex-col sm:border-r sm:border-b-0"
+              className="sage-maintenance-nav"
             >
               {sections.map((s) => (
                 <Button
@@ -449,7 +536,7 @@ export default function Workbench({
                     "shrink-0 justify-start text-sm",
                     tab === s.id && "text-primary",
                   )}
-                  disabled={busy || !!confirmation}
+                  disabled={busy || pending || !!confirmation}
                   aria-current={tab === s.id ? "page" : undefined}
                   onClick={() => void navigate(s.id)}
                 >
@@ -458,7 +545,7 @@ export default function Workbench({
                 </Button>
               ))}
             </nav>
-            <div className="min-w-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+            <div className="sage-maintenance-content">
               <details className="mb-5 rounded-lg border px-3 py-2">
                 <summary className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
                   <KeyRound className="size-4" />
@@ -480,7 +567,7 @@ export default function Workbench({
                 </div>
               </details>
               <fieldset
-                disabled={busy || !!confirmation}
+                disabled={!engine || busy || !!confirmation}
                 className="min-w-0 space-y-5 border-0 p-0"
               >
                 {tab === "create" && (
@@ -488,19 +575,30 @@ export default function Workbench({
                     className="space-y-5"
                     onSubmit={async (e) => {
                       e.preventDefault();
-                      const data = await run("/concepts", "POST", {
-                        frontmatter: {
-                          id: fields.id,
-                          atom: fields.atom,
-                          layer: Number(fields.layer),
-                          domain: split(fields.domain ?? ""),
-                          triggers: split(fields.triggers ?? ""),
-                          confidence: fields.confidence,
-                          source: fields.source,
-                          edges: [],
-                        },
-                        body: fields.molecule,
-                      });
+                      const draft = {
+                        slug: fields.id ?? "",
+                        atom: fields.atom ?? "",
+                        body: fields.molecule ?? "",
+                        layer: Number(fields.layer),
+                        domains: split(fields.domain ?? ""),
+                        triggers: split(fields.triggers ?? ""),
+                        confidence: ["contested", "hypothetical", "confirmed"].indexOf(fields.confidence ?? ""),
+                        source: ["personal", "domain", "synthesis"].indexOf(fields.source ?? ""),
+                        reason: fields.reason ?? "",
+                        declaredAuthor: "",
+                      };
+                      const data = native
+                        ? await operate(() => writer.write("SubmitProposal",
+                            JSON.stringify([kb, "term-create", draft]), token,
+                            () => createTermCommand(kb, readToken, draft)), true)
+                        : await run("/concepts", "POST", {
+                            frontmatter: {
+                              id: fields.id, atom: fields.atom, layer: Number(fields.layer),
+                              domain: draft.domains, triggers: draft.triggers,
+                              confidence: fields.confidence, source: fields.source, edges: [],
+                            },
+                            body: fields.molecule,
+                          });
                       if (data) {
                         setFields({
                           layer: "2",
@@ -509,7 +607,7 @@ export default function Workbench({
                           priority: "medium",
                           type: "depends-on",
                         });
-                        setId(data.id);
+                        if (!native) setId(data.id);
                       }
                     }}
                   >
@@ -578,7 +676,9 @@ export default function Workbench({
                       onChange={(value) => change("source", value)}
                       disabled={busy}
                     />
-                    {submit("创建概念")}
+                    {native && input("reason", "新增理由", { multiline: true })}
+                    {native && <p className="text-xs text-muted-foreground">审批通过后才会创建概念。</p>}
+                    {submit(native ? "提交新增提案" : "创建概念")}
                   </form>
                 )}
                 {tab === "proposal" && (
@@ -588,6 +688,10 @@ export default function Workbench({
                       e.preventDefault();
                       if (!ids.includes(id)) {
                         setError("请选择仍存在的概念。");
+                        return;
+                      }
+                      if (native) {
+                        await submitNative();
                         return;
                       }
                       if (kind === "body" && !revision) {
@@ -632,7 +736,7 @@ export default function Workbench({
                         { value: "edge", label: "概念关联" },
                       ]}
                       onChange={async (next) => {
-                        if (await discard()) {
+                        if (!pending && await discard()) {
                           resetEditor();
                           setKind(next);
                         }
@@ -648,21 +752,8 @@ export default function Workbench({
                           <Button
                             variant="outline"
                             type="button"
-                            disabled={busy || !id}
-                            onClick={async () => {
-                              if (!(await discard())) return;
-                              const data = await run(
-                                `/concepts/${encodeURIComponent(id)}/body`,
-                                "GET",
-                                undefined,
-                                false,
-                              );
-                              if (data) {
-                                setBody(data.body);
-                                setRevision(data.revision);
-                                setDirty(false);
-                              }
-                            }}
+                            disabled={busy || pending || !id}
+                            onClick={() => void loadText()}
                           >
                             <RefreshCw />
                             读取正文
@@ -681,8 +772,18 @@ export default function Workbench({
                         <MarkdownPreview content={body} />
                       </>
                     )}
-                    {kind === "atom" &&
-                      input("atom", "新的摘要", { multiline: true })}
+                    {kind === "atom" && (
+                      <>
+                        {native && (
+                          <Button variant="outline" type="button" disabled={busy || pending || !id}
+                            onClick={() => void loadText()}>
+                            <RefreshCw />
+                            读取摘要
+                          </Button>
+                        )}
+                        {input("atom", "新的摘要", { multiline: true })}
+                      </>
+                    )}
                     {kind === "edge" && (
                       <div className="grid gap-4 sm:grid-cols-2">
                         <Choice
@@ -706,7 +807,7 @@ export default function Workbench({
                         />
                       </div>
                     )}
-                    {input("reason", "修订理由", {
+                    {(!native || kind === "edge") && input("reason", "修订理由", {
                       multiline: true,
                       placeholder: "说明现有内容的问题与本次修改依据。",
                     })}
@@ -727,7 +828,7 @@ export default function Workbench({
                         variant="outline"
                         size="sm"
                         onClick={() => void loadProposals()}
-                        disabled={busy}
+                        disabled={busy || pending}
                       >
                         <RefreshCw />
                         加载提案
@@ -752,7 +853,7 @@ export default function Workbench({
                             "h-auto w-full justify-between gap-3 px-3 py-3 text-left",
                             p.file === file && "border-primary bg-accent",
                           )}
-                          disabled={busy}
+                          disabled={busy || pending}
                           onClick={() => void inspect(p.file)}
                         >
                           <span className="min-w-0">
@@ -778,29 +879,93 @@ export default function Workbench({
                         </Button>
                       ))}
                     </div>
+                    {native && proposalDetail && (
+                      <section aria-label="原生提案内容" className="space-y-2 rounded-lg border p-3">
+                        {proposalDetail.preview.kind === "concept-markdown" ? (
+                          <>
+                            {proposalDetail.preview.atom !== null && (
+                              <p className="whitespace-pre-wrap">{proposalDetail.preview.atom}</p>
+                            )}
+                            {proposalDetail.preview.body !== null && (
+                              <MarkdownPreview content={proposalDetail.preview.body} />
+                            )}
+                          </>
+                        ) : proposalDetail.preview.kind === "term-create" ? (
+                          <>
+                            <p className="font-medium">{proposalDetail.preview.slug}</p>
+                            <p>{proposalDetail.preview.atom}</p>
+                            <p className="text-xs text-muted-foreground">
+                              L{proposalDetail.preview.layer} · {proposalDetail.preview.confidence} · {proposalDetail.preview.source}
+                            </p>
+                            <p>{proposalDetail.preview.domains.join("、")}</p>
+                            <p>{proposalDetail.preview.triggers.join("、")}</p>
+                            <p>{proposalDetail.preview.reason}</p>
+                            <MarkdownPreview content={proposalDetail.preview.body} />
+                          </>
+                        ) : (
+                          <>
+                            <p>
+                              {proposalDetail.proposal.subject} → {proposalDetail.preview.targetSlug}
+                              {" · "}{proposalDetail.preview.relation}{" · "}{proposalDetail.preview.confidence}
+                            </p>
+                            {proposalDetail.proposal.reason && <p>{proposalDetail.proposal.reason}</p>}
+                          </>
+                        )}
+                      </section>
+                    )}
+                    {native && reviewed === file && proposalDetail && (
+                      <Field label="审阅说明">
+                        <Textarea aria-label="审阅说明" rows={3} value={reviewNote}
+                          onChange={(event) => setReviewNote(event.target.value)} disabled={busy || pending} />
+                      </Field>
+                    )}
                     {file && (
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-2">
+                        {native && proposalDetail && (
+                          <Button variant="outline" disabled={busy || !reviewNote.trim() || (pending && pendingReview !== "reject") || reviewed !== file}
+                            onClick={async () => {
+                              const detail = proposalDetail;
+                              if (!(await ask("拒绝此提案？", "拒绝后将保留提案和审阅记录。", "确认拒绝"))) return;
+                              setPendingReview("reject");
+                              const data = await operate(() => writer.write("ReviewProposal",
+                                JSON.stringify([kb, file, detail.proposal.revision, detail.payloadSha256, "reject", reviewNote]),
+                                token, async () => reviewProposal(detail, "DECISION_REJECT", reviewNote)), true);
+                              if (data) {
+                                setReviewed("");
+                                setProposals((old) => old.map((p) => p.file === file
+                                  ? { ...p, status: data.status?.replace(/^PROPOSAL_STATUS_/, "").toLowerCase() ?? p.status }
+                                  : p));
+                              }
+                            }}>
+                            拒绝提案
+                          </Button>
+                        )}
                         <Button
-                          disabled={busy || reviewed !== file}
+                          disabled={busy || (pending && pendingReview !== "approve") || reviewed !== file || (native && (!proposalDetail || !reviewNote.trim()))}
                           onClick={async () => {
                             if (
                               await ask(
                                 "合并此提案？",
-                                "请确认已阅读下方差异。合并后，正式概念将使用这份修订内容。",
+                                native ? "请确认已阅读提案内容。通过后将按当前修订基线应用。" :
+                                  "请确认已阅读下方差异。合并后，正式概念将使用这份修订内容。",
                                 "确认合并",
                               )
                             ) {
-                              const data = await run(
-                                "/proposals/merge",
-                                "POST",
-                                { file },
-                              );
+                              const detail = proposalDetail;
+                              if (native) setPendingReview("approve");
+                              const data = native && detail
+                                ? await operate(() => writer.write("ReviewProposal",
+                                    JSON.stringify([kb, file, detail.proposal.revision, detail.payloadSha256, "approve", reviewNote]),
+                                    token, async () => reviewProposal(detail, "DECISION_APPROVE", reviewNote)), true)
+                                : await run("/proposals/merge", "POST", { file });
                               if (data) {
                                 setReviewed("");
                                 setProposals((old) =>
                                   old.map((p) =>
                                     p.file === file
-                                      ? { ...p, status: "approved" }
+                                      ? { ...p, status: native
+                                            ? (data.status?.replace(/^PROPOSAL_STATUS_/, "").toLowerCase() ?? p.status)
+                                            : "approved" }
                                       : p,
                                   ),
                                 );
@@ -820,18 +985,22 @@ export default function Workbench({
                     className="space-y-5"
                     onSubmit={async (e) => {
                       e.preventDefault();
-                      await run("/frontier", "POST", {
-                        concept: fields.concept,
-                        source: fields.origin,
-                        reason: fields.reason,
-                        priority: fields.priority,
-                      });
+                      const entry = {
+                        concept: fields.concept ?? "", source: fields.origin ?? "",
+                        reason: fields.reason ?? "", priority: fields.priority ?? "",
+                      };
+                      if (native) {
+                        await operate(() => writer.write("CommitCommand", JSON.stringify([kb, "frontier", entry]),
+                          token, () => frontierCommand(kb, readToken, ids.includes(entry.concept), entry)), true);
+                      } else {
+                        await run("/frontier", "POST", entry);
+                      }
                     }}
                   >
                     <Button
                       variant="outline"
                       type="button"
-                      onClick={() => void run("/frontier")}
+                      onClick={() => void run(native ? "/knowledge/frontier" : "/frontier")}
                       disabled={busy}
                     >
                       <Compass />
@@ -864,17 +1033,39 @@ export default function Workbench({
                         variant="outline"
                         disabled={busy || !id}
                         onClick={async () => {
-                          if (!(await discard())) return;
-                          const data = await run(
-                            `/checkpoints/${encodeURIComponent(id)}`,
-                            "GET",
-                            undefined,
-                            false,
-                          );
-                          if (data) {
+                          if (pending || !(await discard())) return;
+                          if (native) {
+                            const current = await operate(async () => {
+                              const value = await readCheckpoint(kb, id, readToken);
+                              let data;
+                              try {
+                                data = JSON.parse(value.content);
+                              } catch {
+                                throw new Error("此快照内容不是工作台支持的 JSON 格式。");
+                              }
+                              const strings = (items: unknown): items is string[] =>
+                                Array.isArray(items) && items.every((item) => typeof item === "string");
+                              if (!data || data.concept !== id || data.session !== value.session ||
+                                  typeof data.date !== "string" || !strings(data.established) ||
+                                  !strings(data.exploredEdges) ||
+                                  (data.nextEntryPoint !== undefined && typeof data.nextEntryPoint !== "string") ||
+                                  !Array.isArray(data.frontier) || !data.frontier.every((item: unknown) =>
+                                    !!item && typeof item === "object" && "id" in item && typeof item.id === "string" &&
+                                    "reason" in item && typeof item.reason === "string" &&
+                                    "priority" in item && typeof item.priority === "string")) {
+                                throw new Error("此快照内容不符合工作台格式。");
+                              }
+                              return { value, data };
+                            }, false, false);
+                            if (!current) return;
+                            setCheckpoint(current.value);
+                            setSnapshot(current.data);
+                          } else {
+                            const data = await run(`/checkpoints/${encodeURIComponent(id)}`, "GET", undefined, false);
+                            if (!data) return;
                             setSnapshot(data);
-                            setDirty(false);
                           }
+                          setDirty(false);
                         }}
                       >
                         <History />
@@ -884,7 +1075,8 @@ export default function Workbench({
                         variant="outline"
                         disabled={busy || !id}
                         onClick={async () => {
-                          if (await discard()) {
+                          if (!pending && await discard()) {
+                            setCheckpoint(null);
                             setSnapshot(newSnapshot());
                             setDirty(true);
                           }
@@ -902,24 +1094,29 @@ export default function Workbench({
                           if (
                             await ask(
                               "保存会话快照？",
-                              `将保存会话 ${snapshot.session}。同编号快照已存在时，其内容会被替换。`,
+                              native ? (checkpoint ? `修订已读取的会话 ${snapshot.session}。` : `创建会话 ${snapshot.session} 的新快照。`) :
+                                `将保存会话 ${snapshot.session}。同编号快照已存在时，其内容会被替换。`,
                               "保存快照",
                             )
-                          )
-                            await run(
-                              `/checkpoints/${encodeURIComponent(id)}`,
-                              "PUT",
-                              {
-                                ...snapshot,
-                                concept: id,
-                                established: snapshot.established.filter((s) =>
-                                  s.trim(),
-                                ),
-                                exploredEdges: snapshot.exploredEdges.filter(
-                                  (s) => s.trim(),
-                                ),
-                              },
-                            );
+                          ) {
+                            const content = {
+                              ...snapshot, concept: id,
+                              established: snapshot.established.filter((s) => s.trim()),
+                              exploredEdges: snapshot.exploredEdges.filter((s) => s.trim()),
+                            };
+                            if (native) {
+                              const saved = await operate(() => writer.write("CommitCommand",
+                                JSON.stringify([kb, "checkpoint", checkpoint?.checkpointId, checkpoint?.revision, content]),
+                                token, async () => checkpointCommand(await readTerm(kb, id, readToken),
+                                  content.session, JSON.stringify(content, null, 2), checkpoint)), true);
+                              if (saved) {
+                                setCheckpoint(null);
+                                setSnapshot(null);
+                              }
+                            } else {
+                              await run(`/checkpoints/${encodeURIComponent(id)}`, "PUT", content);
+                            }
+                          }
                         }}
                       >
                         <div className="grid grid-cols-2 gap-4">
@@ -929,6 +1126,7 @@ export default function Workbench({
                               type="number"
                               min={1}
                               step={1}
+                              readOnly={native && checkpoint !== null}
                               required
                               value={snapshot.session}
                               onChange={(e) =>
@@ -1166,11 +1364,7 @@ export default function Workbench({
                   <Loader2 className="size-3 animate-spin" />
                   正在处理…
                 </>
-              ) : dirty ? (
-                "有未保存的修改"
-              ) : (
-                "所有操作均针对当前知识库"
-              )}
+              ) : dirty ? "有未保存的修改" : null}
             </span>
             <Button
               variant="ghost"

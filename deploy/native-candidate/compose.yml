@@ -1,0 +1,50 @@
+# Example standalone candidate project. This does not overlay the legacy service.
+services:
+  bun:
+    image: ${X_SAGE_NATIVE_BUN_IMAGE:?provide the immutable Bun release image}
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    environment:
+      NODE_ENV: production
+      HOST: '127.0.0.1'
+      PORT: '${X_SAGE_NATIVE_BUN_PORT:-3301}'
+      X_SAGE_DB_MODE: '${X_SAGE_DB_MODE:-rehearsal}'
+      X_SAGE_DB_URL: 'http://127.0.0.1:3901'
+      X_SAGE_DB_KB_UUID: ${X_SAGE_DB_KB_UUID:?provide the selected database UUID}
+      X_SAGE_DB_KB_SLUG: ${X_SAGE_DB_KB_SLUG:?provide the selected database slug}
+      X_SAGE_DB_SOURCE_IDENTITY: ${X_SAGE_DB_SOURCE_IDENTITY:?provide released Rust source manifest SHA-256}
+      X_SAGE_DB_EXPECTED_BUN_COMMIT: ${X_SAGE_DB_EXPECTED_BUN_COMMIT:?provide released Bun commit}
+      X_SAGE_DB_EXPECTED_BUN_REF: ${X_SAGE_DB_EXPECTED_BUN_REF:?provide released Bun build ref}
+      X_SAGE_DB_PROJECTION_DIR: '/run/x-sage-projection'
+      X_SAGE_DB_READ_TOKEN_FILE: '/run/x-sage-credentials/read.token'
+      X_SAGE_DB_AUX_TOKEN_FILE: '/run/x-sage-credentials/aux.token'
+      X_SAGE_DB_CONCEPT_TOKEN_FILE: '/run/x-sage-credentials/concept.token'
+      X_SAGE_DB_PROPOSE_TOKEN_FILE: '${X_SAGE_DB_PROPOSE_TOKEN_FILE:-}'
+      X_SAGE_DB_REVIEW_TOKEN_FILE: '${X_SAGE_DB_REVIEW_TOKEN_FILE:-}'
+      X_SAGE_WRITE_TOKEN_FILE: '/run/x-sage-credentials/public.token'
+    volumes:
+      - type: bind
+        source: ${X_SAGE_BUN_CREDENTIAL_DIR:?provide your dedicated Bun credential directory}
+        target: /run/x-sage-credentials
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${X_SAGE_BUN_PROJECTION_DIR:?provide your dedicated projection directory}
+        target: /run/x-sage-projection
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp
+      - /app/kb:ro,noexec,nosuid,nodev
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(async r=>{const h=await r.json();process.exit(r.ok&&h.ok&&h.mode==='active'&&h.databaseReady&&h.databaseSourceIdentity===process.env.X_SAGE_DB_SOURCE_IDENTITY&&h.commitHash===process.env.X_SAGE_DB_EXPECTED_BUN_COMMIT&&h.buildRef===process.env.X_SAGE_DB_EXPECTED_BUN_REF?0:1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 12s
+      retries: 3
+      start_period: 45s

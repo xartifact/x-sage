@@ -1,0 +1,32 @@
+[package]
+name = "sage-db-migrate"
+description = "Legacy source extraction plan to canonical native record mapping (import-only)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+# Direction: migrate -> {types, format, store, kernel}. Import tooling may read the
+# canonical record types, the typed bridge, and the kernel's real authorization types;
+# it must never be reachable from them. Depending on `kernel` is what lets the import
+# present genuine `Grants::authorize` output instead of a shadow principal string.
+#
+# `serde`/`serde_json` are for the INPUT extraction plan and the import PACKAGE only.
+# They are not a record codec: every native record is built as a canonical type and
+# encoded by the canonical writers through `sage_db_store::typed`.
+
+[dependencies]
+sage-db-types.workspace = true
+sage-db-format.workspace = true
+sage-db-store.workspace = true
+sage-db-kernel.workspace = true
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+[lints]
+workspace = true
+
+# Independent model for importer executor integration tests only.
+[dev-dependencies]
+sage-db-store-tests.workspace = true

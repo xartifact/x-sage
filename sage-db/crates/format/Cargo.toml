@@ -1,0 +1,20 @@
+[package]
+name = "sage-db-format"
+description = "sage-db explicit byte codecs, canonical digests and format versioning; pure, no I/O"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The single definition of every record, digest identity and ledger type lives in
+# `sage-db-types`. This crate must never declare a look-alike.
+sage-db-types.workspace = true
+# Mature primitives only; no hand-rolled crypto or CRC. Versions verified against
+# primary docs and the pinned toolchain (1.98.1) before adoption.
+sha2 = "0.10.9"
+crc32c = "0.6.9"
+
+[lints]
+workspace = true

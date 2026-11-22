@@ -23,6 +23,10 @@ export interface GraphNode {
   molecule: string;
 }
 
+export function conceptName(node: GraphNode): string {
+  return node.molecule.match(/^#\s+(.+)$/m)?.[1]?.trim() || node.id;
+}
+
 export interface GraphEdge {
   from: string;
   type: EdgeType;

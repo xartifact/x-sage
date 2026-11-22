@@ -37,6 +37,24 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      - uses: pnpm/setup@v1
+        with:
+          version: 12.18.0
+          runtime: node@22
+          install: false
+
+      - name: Install pinned protocol generators
+        run: ./scripts/setup-sage-db-codegen.sh "$RUNNER_TEMP/sage-codegen"
+
+      - name: Install pinned Rust toolchain
+        # 1.98.1 不在 runner 的预装列表里；rust-toolchain.toml 会让 rustup 自动拉取，
+        # 但显式安装一步能把「下载失败」和「编译失败」分开，也避免首次 cargo 调用
+        # 在 ci.sh 内部静默联网。
+        run: |
+          PINNED="$(sed -n 's/^channel = "\(.*\)"$/\1/p' sage-db/rust-toolchain.toml)"
+          rustup toolchain install "$PINNED" --profile minimal --component rustfmt,clippy --no-self-update
+          rustc --version
+
       - name: Quality gates + tests
         run: ./scripts/ci.sh
 

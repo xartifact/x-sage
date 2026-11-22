@@ -1,0 +1,271 @@
+//! Descriptor-driven differential corpus: every message, through the PUBLIC wrappers.
+//! Shapes come from the actual generated `sage.v1.rs`; expected values from real pbjson.
+
+use sage_db_protocol::generated as g;
+use sage_db_protocol::ingress::IngressLimits;
+use sage_db_types::ledger::{BudgetError, SharedLedger};
+use sage_db_types::query::ControlStop;
+
+/// A test ledger: everything fits.
+struct Open;
+impl SharedLedger for Open {
+    fn try_charge(&mut self, _b: u64) -> Result<(), BudgetError> {
+        Ok(())
+    }
+    fn try_charge_entries(&mut self, _c: u64) -> Result<(), BudgetError> {
+        Ok(())
+    }
+    fn checkpoint(&mut self) -> Result<(), ControlStop> {
+        Ok(())
+    }
+}
+
+fn limits() -> IngressLimits {
+    IngressLimits::new(1 << 20, 1 << 20)
+}
+
+macro_rules! case {
+    ($name:ident, $ty:ty, $decode:path, $json:expr) => {
+        #[test]
+        fn $name() {
+            let bytes = $json.as_bytes();
+            let want: $ty = serde_json::from_slice(bytes).expect("pbjson accepts");
+            let got = $decode(bytes, limits(), &mut Open).expect("admitted decoder accepts");
+            assert_eq!(got.dto(), &want, "value must equal pbjson for {}", $json);
+        }
+    };
+}
+case!(
+    populated_already_committed,
+    g::AlreadyCommitted,
+    sage_db_protocol::ingress::decode_already_committed,
+    r#"{"recorded":{"affected":[{"key":{},"revision":"x"}],"counters":[{"space":1,"hwm":"x"}],"commitVersion":"x","resultRef":"x"},"originalStatus":"PROPOSAL_STATUS_UNSPECIFIED"}"#
+);
+case!(
+    populated_budget_detail,
+    g::BudgetDetail,
+    sage_db_protocol::ingress::decode_budget_detail,
+    r#"{"unit":"BUDGET_UNIT_UNSPECIFIED","requested":"x","remaining":"x"}"#
+);
+case!(
+    populated_claim_edit,
+    g::ClaimEdit,
+    sage_db_protocol::ingress::decode_claim_edit,
+    r#"{"subject":{"kind":1,"id":"x"},"claim":{"kind":1,"id":"x"},"text":"x","declaredAuthor":"x"}"#
+);
+case!(
+    populated_command_error,
+    g::CommandError,
+    sage_db_protocol::ingress::decode_command_error,
+    r#"{"code":"ERROR_CODE_UNSPECIFIED","message":"x","budget":{"unit":"BUDGET_UNIT_UNSPECIFIED","requested":"x","remaining":"x"}}"#
+);
+case!(
+    populated_commit_command_request,
+    g::CommitCommandRequest,
+    sage_db_protocol::ingress::decode_commit_command_request,
+    r#"{"envelope":{"protocolVersion":1,"kbUuid":"x","requestId":"x","deadlineMs":1,"readSet":[{"key":{},"revision":"x"}],"expectVersion":"x"},"payload":{"createSessionCheckpoint":{"concept":{},"sessionNo":1,"content":"x"}}}"#
+);
+case!(
+    populated_commit_command_response,
+    g::CommitCommandResponse,
+    sage_db_protocol::ingress::decode_commit_command_response,
+    r#"{"outcome":{"committed":{"recorded":{},"submit":{"proposal":{}}}}}"#
+);
+case!(
+    populated_commit_payload,
+    g::CommitPayload,
+    sage_db_protocol::ingress::decode_commit_payload,
+    r#"{"createSessionCheckpoint":{"concept":{"kind":1,"id":"x"},"sessionNo":1,"content":"x"}}"#
+);
+case!(
+    populated_committed,
+    g::Committed,
+    sage_db_protocol::ingress::decode_committed,
+    r#"{"recorded":{"affected":[{"key":{},"revision":"x"}],"counters":[{"space":1,"hwm":"x"}],"commitVersion":"x","resultRef":"x"},"submit":{"proposal":{"kind":1,"id":"x"}}}"#
+);
+case!(
+    populated_concept_text,
+    g::ConceptText,
+    sage_db_protocol::ingress::decode_concept_text,
+    r#"{"subject":{"kind":1,"id":"x"},"atom":"x","body":"x","declaredAuthor":"x"}"#
+);
+case!(
+    populated_counter,
+    g::Counter,
+    sage_db_protocol::ingress::decode_counter,
+    r#"{"space":1,"hwm":"x"}"#
+);
+case!(
+    populated_envelope,
+    g::Envelope,
+    sage_db_protocol::ingress::decode_envelope,
+    r#"{"protocolVersion":1,"kbUuid":"x","requestId":"x","deadlineMs":1,"readSet":[{"key":{"kind":1,"id":"x"},"revision":"x"}],"expectVersion":"x"}"#
+);
+case!(
+    populated_frontier_state,
+    g::FrontierState,
+    sage_db_protocol::ingress::decode_frontier_state,
+    r#"{"conceptRefs":[{"kind":1,"id":"x"}],"text":"x","priority":1,"status":1}"#
+);
+case!(
+    populated_get_request_outcome_request,
+    g::GetRequestOutcomeRequest,
+    sage_db_protocol::ingress::decode_get_request_outcome_request,
+    r#"{"envelope":{"protocolVersion":1,"kbUuid":"x","requestId":"x","deadlineMs":1,"readSet":[{"key":{},"revision":"x"}],"expectVersion":"x"}}"#
+);
+case!(
+    populated_get_request_outcome_response,
+    g::GetRequestOutcomeResponse,
+    sage_db_protocol::ingress::decode_get_request_outcome_response,
+    r#"{"found":{"originalVersion":"x","resultRef":"x","requestDigest":"x","basis":{"kbUuid":"x","version":"x","manifestSha256":"x"},"recorded":{"affected":[{}],"counters":[{}],"commitVersion":"x","resultRef":"x"},"originalStatus":"PROPOSAL_STATUS_UNSPECIFIED"}}"#
+);
+case!(
+    populated_handshake_request,
+    g::HandshakeRequest,
+    sage_db_protocol::ingress::decode_handshake_request,
+    r#"{"envelope":{"protocolVersion":1,"kbUuid":"x","requestId":"x","deadlineMs":1,"readSet":[{"key":{},"revision":"x"}],"expectVersion":"x"}}"#
+);
+case!(
+    populated_handshake_response,
+    g::HandshakeResponse,
+    sage_db_protocol::ingress::decode_handshake_response,
+    r#"{"profile":"x","sourceIdentity":"x","capabilities":["x"],"limits":{"maxPayloadBytes":1,"maxRefs":1,"maxAtomBytes":1,"maxAtomUtf16Units":1}}"#
+);
+case!(
+    populated_limits,
+    g::Limits,
+    sage_db_protocol::ingress::decode_limits,
+    r#"{"maxPayloadBytes":1,"maxRefs":1,"maxAtomBytes":1,"maxAtomUtf16Units":1}"#
+);
+case!(
+    populated_outcome_absent,
+    g::OutcomeAbsent,
+    sage_db_protocol::ingress::decode_outcome_absent,
+    r#"{"basis":{"kbUuid":"x","version":"x","manifestSha256":"x"}}"#
+);
+case!(
+    populated_outcome_found,
+    g::OutcomeFound,
+    sage_db_protocol::ingress::decode_outcome_found,
+    r#"{"originalVersion":"x","resultRef":"x","requestDigest":"x","basis":{"kbUuid":"x","version":"x","manifestSha256":"x"},"recorded":{"affected":[{"key":{},"revision":"x"}],"counters":[{"space":1,"hwm":"x"}],"commitVersion":"x","resultRef":"x"},"originalStatus":"PROPOSAL_STATUS_UNSPECIFIED"}"#
+);
+case!(
+    populated_outcome_incomplete,
+    g::OutcomeIncomplete,
+    sage_db_protocol::ingress::decode_outcome_incomplete,
+    r#"{"reason":"x"}"#
+);
+case!(
+    populated_record_key,
+    g::RecordKey,
+    sage_db_protocol::ingress::decode_record_key,
+    r#"{"kind":1,"id":"x"}"#
+);
+case!(
+    populated_recorded_commit,
+    g::RecordedCommit,
+    sage_db_protocol::ingress::decode_recorded_commit,
+    r#"{"affected":[{"key":{"kind":1,"id":"x"},"revision":"x"}],"counters":[{"space":1,"hwm":"x"}],"commitVersion":"x","resultRef":"x"}"#
+);
+case!(
+    populated_rev_pair,
+    g::RevPair,
+    sage_db_protocol::ingress::decode_rev_pair,
+    r#"{"key":{"kind":1,"id":"x"},"revision":"x"}"#
+);
+case!(
+    populated_review_committed,
+    g::ReviewCommitted,
+    sage_db_protocol::ingress::decode_review_committed,
+    r#"{"proposal":{"kind":1,"id":"x"},"status":"PROPOSAL_STATUS_UNSPECIFIED"}"#
+);
+case!(
+    populated_review_decision_payload,
+    g::ReviewDecisionPayload,
+    sage_db_protocol::ingress::decode_review_decision_payload,
+    r#"{"proposal":{"kind":1,"id":"x"},"decision":"DECISION_UNSPECIFIED","note":"x"}"#
+);
+case!(
+    populated_review_payload,
+    g::ReviewPayload,
+    sage_db_protocol::ingress::decode_review_payload,
+    r#"{"claimEdit":{"proposal":{"kind":1,"id":"x"},"decision":"DECISION_UNSPECIFIED","note":"x"}}"#
+);
+case!(
+    populated_review_proposal_request,
+    g::ReviewProposalRequest,
+    sage_db_protocol::ingress::decode_review_proposal_request,
+    r#"{"envelope":{"protocolVersion":1,"kbUuid":"x","requestId":"x","deadlineMs":1,"readSet":[{"key":{},"revision":"x"}],"expectVersion":"x"},"payload":{"claimEdit":{"proposal":{},"decision":"DECISION_UNSPECIFIED","note":"x"}}}"#
+);
+case!(
+    populated_review_proposal_response,
+    g::ReviewProposalResponse,
+    sage_db_protocol::ingress::decode_review_proposal_response,
+    r#"{"outcome":{"committed":{"recorded":{},"submit":{"proposal":{}}}}}"#
+);
+case!(
+    populated_relation_assert,
+    g::RelationAssert,
+    sage_db_protocol::ingress::decode_relation_assert,
+    r#"{"from":{"kind":1,"id":"1"},"target":{"kind":1,"id":"2"},"relation":0,"confidence":0,"declarationOrder":12,"declaredAuthor":"","reason":"typed relation"}"#
+);
+case!(
+    populated_revise_frontier,
+    g::ReviseFrontier,
+    sage_db_protocol::ingress::decode_revise_frontier,
+    r#"{"frontier":{"kind":1,"id":"x"},"state":{"conceptRefs":[{"kind":1,"id":"x"}],"text":"x","priority":1,"status":1}}"#
+);
+case!(
+    populated_revise_session_checkpoint,
+    g::ReviseSessionCheckpoint,
+    sage_db_protocol::ingress::decode_revise_session_checkpoint,
+    r#"{"checkpoint":{"kind":1,"id":"x"},"state":{"concept":{"kind":1,"id":"x"},"sessionNo":1,"content":"x"}}"#
+);
+case!(
+    populated_session_checkpoint_state,
+    g::SessionCheckpointState,
+    sage_db_protocol::ingress::decode_session_checkpoint_state,
+    r#"{"concept":{"kind":1,"id":"x"},"sessionNo":1,"content":"x"}"#
+);
+case!(
+    populated_submit_committed,
+    g::SubmitCommitted,
+    sage_db_protocol::ingress::decode_submit_committed,
+    r#"{"proposal":{"kind":1,"id":"x"}}"#
+);
+case!(
+    populated_submit_payload,
+    g::SubmitPayload,
+    sage_db_protocol::ingress::decode_submit_payload,
+    r#"{"claimEdit":{"subject":{"kind":1,"id":"x"},"claim":{"kind":1,"id":"x"},"text":"x","declaredAuthor":"x"}}"#
+);
+case!(
+    populated_submit_proposal_request,
+    g::SubmitProposalRequest,
+    sage_db_protocol::ingress::decode_submit_proposal_request,
+    r#"{"envelope":{"protocolVersion":1,"kbUuid":"x","requestId":"x","deadlineMs":1,"readSet":[{"key":{},"revision":"x"}],"expectVersion":"x"},"payload":{"claimEdit":{"subject":{},"claim":{},"text":"x","declaredAuthor":"x"}}}"#
+);
+case!(
+    populated_submit_proposal_response,
+    g::SubmitProposalResponse,
+    sage_db_protocol::ingress::decode_submit_proposal_response,
+    r#"{"outcome":{"committed":{"recorded":{},"submit":{"proposal":{}}}}}"#
+);
+case!(
+    populated_unknown,
+    g::Unknown,
+    sage_db_protocol::ingress::decode_unknown,
+    r#"{"requestId":"x"}"#
+);
+case!(
+    populated_view_basis,
+    g::ViewBasis,
+    sage_db_protocol::ingress::decode_view_basis,
+    r#"{"kbUuid":"x","version":"x","manifestSha256":"x"}"#
+);
+case!(
+    populated_write_outcome,
+    g::WriteOutcome,
+    sage_db_protocol::ingress::decode_write_outcome,
+    r#"{"committed":{"recorded":{"affected":[{}],"counters":[{}],"commitVersion":"x","resultRef":"x"},"submit":{"proposal":{"kind":1,"id":"x"}}}}"#
+);

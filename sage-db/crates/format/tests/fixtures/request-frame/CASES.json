@@ -1,0 +1,102 @@
+{
+  "generator": "reqgen.py",
+  "provenance": "Independently authored from docs/design/storage-digests.md \u00a74.7/\u00a74.7.2/\u00a74.7.3; not produced by the Rust codec under test. golden-* cases are verbatim immutable D10 vectors whose digests equal the persisted tx-header 178 values.",
+  "cases": [
+    {
+      "name": "golden-v2-one-op",
+      "file": "golden-v2-one-op.bin",
+      "bytes": 35,
+      "sha256": "3b729abcb886449283700aedb5663ad0d9b9a56938c3bd698313676c3a428a84",
+      "request_digest": "7f37fecacf9bea01fa4621e3bb24ad5c0d798dc3677916a2eb20ebf821e940bb",
+      "note": "verbatim golden.request.v2.bin from immutable D10; the generator re-derives it identically"
+    },
+    {
+      "name": "min-one-op",
+      "file": "min-one-op.bin",
+      "bytes": 20,
+      "sha256": "75ebb8dc25ab3b6cbb97369b7e709bfe539f6ec6a152d994a3ba96d58d11ff2c",
+      "request_digest": "4fdcf685abd4db8251daa1679fb9afb304b29834bdd1f71068e501880e89301b",
+      "note": "smallest legal frame: one op, one payload byte, empty read set, no expected version"
+    },
+    {
+      "name": "read-set-ascending",
+      "file": "read-set-ascending.bin",
+      "bytes": 101,
+      "sha256": "936a67c374552b555a58fb3fb501ddb37f8c5a01941b910bb90bb7dfd654e3a8",
+      "request_digest": "d8c4579852dc6da5815d4996e30b117ce7c73ad0107b0dcba8e38d2859e1b415",
+      "note": "three read-set pairs in numeric order across two kinds"
+    },
+    {
+      "name": "read-set-term-max",
+      "file": "read-set-term-max.bin",
+      "bytes": 46,
+      "sha256": "76b098c9513d3a4b69d7cc4621fbeaaa5f7c4fc38e5114074d7f1532d3863673",
+      "request_digest": "5c4b5d648770c0fc452a19b765cadeb4a59d340d59557c85c24f1a8d514c69fb",
+      "note": "term read-set id at u32::MAX, encoded in 16 bytes"
+    },
+    {
+      "name": "expected-version",
+      "file": "expected-version.bin",
+      "bytes": 28,
+      "sha256": "254a91aff8d358c997019dee441c1bdfc3fb9136e13530e38d6bdbe9c053d638",
+      "request_digest": "fb53a0277301154a5e71d2b1f20a75fa5340cf1ae018f1cb2d775f95ce75f7df",
+      "note": "expected_version present: flag 1 followed by u64 42"
+    },
+    {
+      "name": "expected-version-one",
+      "file": "expected-version-one.bin",
+      "bytes": 28,
+      "sha256": "f49dc50425ea19c2593cfb32c043fae3aafd9e3dce427294ec7fde9e85cbee12",
+      "request_digest": "8a49c19fefcbf305a2fbbf8a90dad2d7d7fbba01ddda2876a070ab248c589808",
+      "note": "the smallest legal expected version, because 0 means absent"
+    },
+    {
+      "name": "expected-version-two",
+      "file": "expected-version-two.bin",
+      "bytes": 28,
+      "sha256": "46efc38fed0a20bdb728e60ab9480dd836099bf4f8efe2c54d80c774199dd0ba",
+      "request_digest": "a161179a5818db2ab5f44f487d3987c07f144f9da1dec794e8510af3ca8bf5f3",
+      "note": "flag 1 with value 2: a legal version, distinct from an illegal presence flag of 2"
+    },
+    {
+      "name": "ops-two-order-preserved",
+      "file": "ops-two-order-preserved.bin",
+      "bytes": 38,
+      "sha256": "830c2c2b39f366ac32aa71bfad0f4cc2962c535f58f3b185d8f7423b12e1e7d4",
+      "request_digest": "379f26ee2a65c359acd64b138af6e73bf9f10fdea2ac97f36bde1a0bdbb20c6d",
+      "note": "op order is part of the request: kinds are deliberately descending"
+    },
+    {
+      "name": "op-unknown-kind",
+      "file": "op-unknown-kind.bin",
+      "bytes": 25,
+      "sha256": "957cb254474db02eef73ebc8a2fa7d9083409a72f8906ce1365997d3196df418",
+      "request_digest": "85169ee16f2a7f8236b1260df906378040331986a961542cb82b680a19c11278",
+      "note": "unregistered kind and version are legal frames with unknown semantics"
+    },
+    {
+      "name": "op-payload-max",
+      "file": "op-payload-max.bin",
+      "bytes": 65555,
+      "sha256": "8870b77622cb22e3afff3e7325746829db9567329abab945d676f40c7b943cba",
+      "request_digest": "ee029c8e5b914a323a5ac3f86e85b19338906106a72827c8bc1f92a5debeee15",
+      "note": "single payload at the 65536-byte ceiling"
+    },
+    {
+      "name": "read-set-empty-declared",
+      "file": "read-set-empty-declared.bin",
+      "bytes": 20,
+      "sha256": "ba24b3a8cbaceaafd7c309f32d4ebc3efe99dce0b27037d6580d857f0fd26914",
+      "request_digest": "de4bdf48897e00dfcaad5befbbc133a7d4d64b57a9469d1a54030b470ef232e9",
+      "note": "read_set count 0 is legal; the ceiling is an upper bound only"
+    },
+    {
+      "name": "ops-many",
+      "file": "ops-many.bin",
+      "bytes": 523,
+      "sha256": "f4f191152c8f92b82e055df317f6ea10d736aeefef172c9f47e2bc2481613dfd",
+      "request_digest": "8d059d71d16f2a704116ff26a4a4abf5831ce423211c95715d15c07293ba1c8c",
+      "note": "32 ops exercise the count-prefixed table without a megabyte fixture"
+    }
+  ]
+}

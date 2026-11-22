@@ -1,0 +1,15 @@
+[package]
+name = "sage-db-reference"
+description = "sage-db naive reference executor and differential oracle; test-only, never published"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# 参考实现只允许依赖共享契约，不得依赖 infer 的任何代码或数据结构。
+sage-db-types.workspace = true

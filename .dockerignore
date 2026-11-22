@@ -11,3 +11,6 @@ docs
 .omo
 *.md
 !kb/**/*.md
+# sage-db 目前不被镜像构建使用（运行时仍是 TS 服务）。排除 workspace 与构建产物，
+# 避免 target/ 进入上下文拖慢构建或污染缓存层。
+sage-db

@@ -1,0 +1,42 @@
+[package]
+name = "sage-db-protocol"
+description = "Generated sage-db command protocol: Rust types plus standard protobuf JSON support"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+# Direction: protocol -> {serde plumbing}, never protocol -> {types, store, kernel}.
+# This crate is the wire boundary only. It carries no kernel business logic and must not
+# learn it: a validation module that re-implemented term bounds, reference ordering or
+# budget accounting would be a second authority beside the kernel.
+
+[dependencies]
+# The canonical ledger, refusal and control types. Declared as a direct dependency on
+# purpose: re-declaring `SharedLedger`/`BudgetError`/`ControlStop` here would be a second
+# structurally similar authority for the same concepts, and a refusal produced by one could
+# not be matched against the other at a call site. `sage-db-types` stays dependency-free;
+# this edge runs protocol -> types only.
+sage-db-types.workspace = true
+prost = "0.14.6"
+pbjson = "0.9.0"
+pbjson-types = "0.9.0"
+serde = { version = "1.0.229", features = ["derive"] }
+
+# One mature JSON grammar with pre-admitted scratch and allocation-free parser errors.
+# The workspace patch binds this exact version to the reviewed vendor candidate.
+serde_json = { version = "=1.0.154", features = ["admission"] }
+
+[dev-dependencies]
+
+[build-dependencies]
+prost-build = "0.14.6"
+# The admitted seed generator consumes the same descriptor as prost/pbjson.
+prost = "0.14.6"
+prost-types = "0.14.6"
+heck = "0.5.0"
+pbjson-build = "0.9.0"
+
+[lints]
+workspace = true

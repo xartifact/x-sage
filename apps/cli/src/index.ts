@@ -8,7 +8,7 @@ import { formatVersion, readCliBuildInfo } from "./build-info.ts";
  * x-sage CLI — a REST client.
  *
  * The server is the only component that reads the knowledge base. This file
- * translates argv into one HTTP request against `/api/*` and writes the
+ * translates argv into one HTTP request and writes the
  * response body to stdout; text is rendered server-side, so the client needs
  * no graph, no schema and no kb files.
  *
@@ -114,11 +114,23 @@ function requirePositional(value: string | undefined, usage: string): string {
 }
 
 /** Map a CLI invocation onto the shared request shape. */
+const nativeService = "/sage.v1.SageCommandService/";
+const nativeMethods = {
+  handshake: "Handshake",
+  submit: "SubmitProposal",
+  review: "ReviewProposal",
+  commit: "CommitCommand",
+  outcome: "GetRequestOutcome",
+} as const;
+
 interface Invocation {
   method: ApiMethod;
   path: string;
   query: Record<string, string | undefined>;
   body?: unknown;
+  nativeMethod?: keyof typeof nativeMethods;
+  requestFile?: string;
+  requestBytes?: ArrayBuffer;
   /**
    * Print the body on stdout even when the status is an error.
    *
@@ -231,6 +243,30 @@ function invoke(command: string, args: string[], stdinCheckpoint?: unknown): Inv
         path: "/frontier",
         query: { format: flags.json === "true" ? "json" : "text" },
       };
+    }
+
+    case "native": {
+      const subcmd = positional[0];
+      if (subcmd === "checkpoint") {
+        const id = requirePositional(positional[1], "Usage: x-sage native checkpoint <concept-id> [session-number]");
+        return {
+          method: "GET",
+          path: `/knowledge/checkpoints/${encodeURIComponent(id)}`,
+          query: { session: positional[2] },
+        };
+      }
+
+      if (subcmd && Object.hasOwn(nativeMethods, subcmd)) {
+        const method = subcmd as keyof typeof nativeMethods;
+        return {
+          method: "POST",
+          path: nativeService + nativeMethods[method],
+          query: {},
+          nativeMethod: method,
+          requestFile: requirePositional(positional[1], `Usage: x-sage native ${method} <request.json|->`),
+        };
+      }
+      emitJsonError("Usage: x-sage native checkpoint <concept-id> [session] | native handshake|submit|review|commit|outcome <request.json|->");
     }
 
     case "checkpoint": {
@@ -626,15 +662,20 @@ Usage: x-sage <command> [args] [flags]
 
 Connection:
   --server <url>                        Server base URL
-  --token <token>                       Bearer token for write commands
+  --token <token>                       Bearer token for an authenticated server
 
   Resolution: flags > environment > config file.
     X_SAGE_SERVER / X_SAGE_TOKEN        environment
     ~/.config/x-sage/config.toml        server = "...", token = "..."
                                         (honours XDG_CONFIG_HOME)
 
-Every command is one HTTP request against the server's REST API; the client
-holds no kb data and never touches the filesystem.
+Native Rust service:
+  native checkpoint <concept-id> [session-number]
+  native handshake|submit|review|commit|outcome <request.json|->
+
+Every command makes one HTTP request. The client holds no KB data. Native
+commands send the caller's request bytes directly. Exit 2 means a native
+attempt or outcome was inconclusive; look up the original request id.
 
 Read:
   manifest [--write]                    Render MANIFEST.md; --write persists it
@@ -684,30 +725,72 @@ async function runRemote(
   token: string | undefined,
 ): Promise<void> {
   const stream = invocation.reportToStdout === true ? "out" : undefined;
-  // Every path the dispatcher serves lives under /api on the wire.
   const base = server.endsWith("/") ? server.slice(0, -1) : server;
-  const url = new URL(`${base}/api${invocation.path}`);
+  const url = new URL(`${base}${invocation.nativeMethod ? "" : "/api"}${invocation.path}`);
+  const mutations = invocation.nativeMethod === "submit" ||
+    invocation.nativeMethod === "review" || invocation.nativeMethod === "commit";
   for (const [key, value] of Object.entries(invocation.query)) {
     if (value !== undefined) url.searchParams.set(key, value);
   }
 
   const headers: Record<string, string> = { accept };
   if (token !== undefined) headers.authorization = `Bearer ${token}`;
-  if (invocation.body !== undefined) headers["content-type"] = "application/json";
+  const outbound = invocation.requestBytes ??
+    (invocation.body === undefined ? undefined : JSON.stringify(invocation.body));
+  if (outbound !== undefined) headers["content-type"] = "application/json";
 
   let response: Response;
   try {
     response = await fetch(url, {
       method: invocation.method,
       headers,
-      ...(invocation.body === undefined ? {} : { body: JSON.stringify(invocation.body) }),
+      ...(invocation.nativeMethod ? { redirect: "error" as const } : {}),
+      ...(outbound === undefined ? {} : { body: outbound }),
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
+    if (mutations) {
+      writeAll("err", `Request result unconfirmed at ${url.origin}. Look up the original request id.\n`);
+      process.exit(2);
+    }
     emitJsonError(`cannot reach ${url.origin}: ${detail}`);
   }
 
-  const body = await response.text();
+  let body: string;
+  try {
+    body = await response.text();
+  } catch (error) {
+    if (mutations) {
+      writeAll("err", "Request response incomplete. Look up the original request id.\n");
+      process.exit(2);
+    }
+    throw error;
+  }
+
+  if (invocation.nativeMethod && response.ok) {
+    let reply;
+    try {
+      reply = JSON.parse(body);
+    } catch {
+      if (mutations) {
+        writeAll("err", "Request response unreadable. Look up the original request id.\n");
+        process.exit(2);
+      }
+      emitJsonError("Native service response is not JSON");
+    }
+    if (reply?.error || reply?.outcome?.error) {
+      writeAll("err", body);
+      process.exit(1);
+    }
+    if ((mutations && !reply?.outcome?.committed?.recorded && !reply?.outcome?.alreadyCommitted?.recorded) ||
+        (invocation.nativeMethod === "outcome" && !reply?.found?.recorded && !reply?.absent)) {
+      writeAll("out", body);
+      process.exit(2);
+    }
+  } else if (mutations && (response.status === 408 || response.status >= 500)) {
+    writeAll("err", body);
+    process.exit(2);
+  }
 
   // `viz export` writes the payload to a file instead of stdout.
   const exportPath = invocation.query.export;
@@ -758,6 +841,14 @@ async function main(): Promise<void> {
   }
 
   const invocation = invoke(command, allArgs.slice(1), stdinCheckpoint);
+
+  if (invocation.requestFile !== undefined) {
+    const file = invocation.requestFile;
+    invocation.requestBytes = file === "-"
+      ? await new Response(Bun.stdin.stream()).arrayBuffer()
+      : await Bun.file(file).arrayBuffer();
+    if (invocation.requestBytes.byteLength === 0) emitJsonError("Native request is empty");
+  }
 
   if (invocation.readPayloadFrom !== undefined) {
     for (const [target, source] of Object.entries(invocation.readPayloadFrom)) {

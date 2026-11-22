@@ -171,6 +171,12 @@ export async function proposeBody(
 export async function readBodyProposal(proposalsDir: string, filename: string): Promise<BodyProposal> {
   assertBodyProposalFilename(filename);
   const raw = await readFile(join(proposalsDir, "bodies", filename), "utf-8");
+  return parseBodyProposal(filename, raw);
+}
+
+/** The legacy public row projected from one exact proposal document. */
+export function parseBodyProposal(filename: string, raw: string): BodyProposal {
+  assertBodyProposalFilename(filename);
   const parsed = JSON.parse(raw) as Omit<BodyProposal, "file">;
   if (typeof parsed.conceptId !== "string" || typeof parsed.proposedBody !== "string") {
     throw new Error(`Body proposal ${filename} is malformed`);

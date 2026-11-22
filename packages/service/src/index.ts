@@ -36,6 +36,8 @@ export type {
   MergeOutcome,
 } from "./write.ts";
 
+export type { ProposalMergeDecision, ProposalMergeFile, ProposalMergePort } from "./proposal-merge.ts";
+
 export { validateConcepts } from "./validate.ts";
 export type { ConceptValidationReport } from "./validate.ts";
 
@@ -52,7 +54,7 @@ export {
   conceptMarkdown,
 } from "./structured.ts";
 export * as store from "./store/index.ts";
-export type { ApiMethod, ApiRequest, ApiResponse } from "./api.ts";
+export type { ApiMethod, ApiRequest, ApiResponse, NativeTermReader } from "./api.ts";
 
 export {
   renderActivation,

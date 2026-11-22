@@ -1,0 +1,43 @@
+{
+  "concept": "x-sage-concept-kb",
+  "session": 1,
+  "date": "2026-11-16",
+  "established": [
+    "用户确认的项目总览正文已合并。",
+    "以下五份为完整候选草案，尚未创建正式概念节点；候选内容不属于已确认结论。",
+    "---\n{\n  \"id\": \"definition-dependency-layering\",\n  \"atom\": \"按理解一个概念所必需的定义前提组织抽象层次，使理解顺序可解释，避免把重要性或实现顺序误当层级。\",\n  \"layer\": 2,\n  \"domain\": [\n    \"engineering\"\n  ],\n  \"confidence\": \"hypothetical\",\n  \"source\": \"synthesis\",\n  \"triggers\": [\n    \"定义依赖\",\n    \"概念分层\",\n    \"L0\",\n    \"L1\",\n    \"L2\",\n    \"L3\"\n  ],\n  \"edges\": [\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"context\",\n      \"confidence\": \"hypothetical\"\n    },\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"constraint\",\n      \"confidence\": \"hypothetical\"\n    }\n  ]\n}\n---\n\n# 定义依赖分层\n\n## 核心内容（molecule）\n\n主体在特定语境中理解概念时，已有知识限定了哪些定义可以直接使用。定义依赖分层将这种理解约束显式化：若解释 A 必须使用 B，则 B 是 A 的前提。层级表达定义的抽象程度，依赖边表达具体前提，两者不能互相替代。\n\n先区分不可在体系内继续分解的基础词汇、由其定义的主干概念、领域细化和具体实例，再检查每个定义实际引用什么。移除某个前提仍能理解定义，说明它可能只是相关知识，不应强行设为 depends-on。共同出现、代码调用、部署顺序都不足以证明定义依赖。\n\nx-sage 采用 L0—L3，并计算 depends-on 闭包。L3 产品实例可以替换，抽象原则不能因为当前只有一个实现就依赖该实例。本文自身是知识组织领域的 L2 方法，既不是新的 L0 公理，也不要求所有领域都使用四层。\n\n## 张力与开放问题\n\n分层越细，维护成本越高；层向合法不保证定义合理。循环定义需要重新划界或承认共同基础，不能靠换层号掩盖。\n\n## 激活建议\n\n先加载定义前提：[context, constraint]。需要具体实现案例时再加载 x-sage-concept-kb；该实例不是定义前提。\n\n## 来源与状态\n\n2026-11-16 从 x-sage 项目架构、边语义文档及已确认项目总览提炼。候选拆分及边尚待审阅，hypothetical 不表示已验证的普遍规律。\n",
+    "---\n{\n  \"id\": \"budgeted-concept-activation\",\n  \"atom\": \"主体按任务目标和上下文预算选择概念正文，同时保留必要定义前提，并显式声明未加载的知识边界。\",\n  \"layer\": 2,\n  \"domain\": [\n    \"engineering\"\n  ],\n  \"confidence\": \"hypothetical\",\n  \"source\": \"synthesis\",\n  \"triggers\": [\n    \"按需激活\",\n    \"上下文预算\",\n    \"触发词\",\n    \"稀疏注意力\",\n    \"molecule\"\n  ],\n  \"edges\": [\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"constraint\",\n      \"confidence\": \"hypothetical\"\n    },\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"goal\",\n      \"confidence\": \"hypothetical\"\n    },\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"context\",\n      \"confidence\": \"hypothetical\"\n    }\n  ]\n}\n---\n\n# 预算约束激活\n\n## 核心内容（molecule）\n\n知识总量超过主体当前可处理的范围时，激活是对有限注意力的分配。主体先扫描摘要，再按目标选择正文；预算既限制加载规模，也要求对必要前提与扩展材料作不同处理。相关性只说明可能有用，不代表足以支撑结论。\n\n执行过程是扫描索引、匹配触发词、声明概念集合、加载正文、检查缺失前提、再推理。预算不足时应缩小问题或分段推进，并记录缺口；不应悄悄省略关键前提后把结论当成充分验证。探索、验证、生成各自采用不同导航偏好。\n\nx-sage 用 MANIFEST、atom 与 molecule 区分扫描和深入，REQUIRES 给出前提闭包，LOAD-NEXT 给出导航建议。五个正文是技能中的使用建议，不能当成所有模型和任务的通用最优值。预算约束激活也不意味着关键词匹配在所有检索问题上优于向量搜索。\n\n## 张力与开放问题\n\n覆盖面与注意力集中存在张力。触发词遗漏会使重要概念不可见，前提闭包也可能大于预算；应把这些缺口暴露出来，而不是用截断制造完整性假象。\n\n## 激活建议\n\n先加载定义前提：[constraint, goal, context]。需要具体实现案例时再加载 x-sage-concept-kb；该实例不是定义前提。\n\n## 来源与状态\n\n2026-11-16 从 x-sage 项目架构、边语义文档及已确认项目总览提炼。候选拆分及边尚待审阅，hypothetical 不表示已验证的普遍规律。\n",
+    "---\n{\n  \"id\": \"typed-relation-reasoning\",\n  \"atom\": \"为概念关联声明关系类型及其推导规则，区分作者断言与派生结论，限制哪些推理路径可以成立。\",\n  \"layer\": 2,\n  \"domain\": [\n    \"engineering\"\n  ],\n  \"confidence\": \"hypothetical\",\n  \"source\": \"synthesis\",\n  \"triggers\": [\n    \"类型化边\",\n    \"关系代数\",\n    \"传递闭包\",\n    \"对称关系\",\n    \"边语义\"\n  ],\n  \"edges\": [\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"constraint\",\n      \"confidence\": \"hypothetical\"\n    },\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"context\",\n      \"confidence\": \"hypothetical\"\n    }\n  ]\n}\n---\n\n# 类型化关系推理\n\n## 核心内容（molecule）\n\n关联只有在语境中具有明确含义，才足以约束推理。类型化关系为每条边指定语义，并声明是否可传递、是否对称、是否禁止环以及允许的层向；这些规则限制从已知关系到新结论的合法步骤。普通链接只表明可导航，不具有同样的推理许可。\n\n作者边和派生边必须可区分。对称关系允许反向查询，传递关系允许同类型路径闭包，但不能随意复合不同关系。置信度需要随证据传递，不能把弱假设经过多跳包装成确定结论。关系规则正确也不保证作者录入的事实正确。\n\nx-sage 的 contradicts 表达辩证张力，不表示逻辑互斥；enables 表示理解导航，不是 depends-on 的逆。把互相促进改写成互相依赖会制造假环。查询入向关联与扩展出边是不同操作，不能用后者代替前者。\n\n## 张力与开放问题\n\n规则越强，表达越受限；规则越弱，错误路径越容易混入。新增关系应同时明确语义、派生规则和校验边界，不能只为界面增加一个标签。\n\n## 激活建议\n\n先加载定义前提：[constraint, context]。需要具体实现案例时再加载 x-sage-concept-kb；该实例不是定义前提。\n\n## 来源与状态\n\n2026-11-16 从 x-sage 项目架构、边语义文档及已确认项目总览提炼。候选拆分及边尚待审阅，hypothetical 不表示已验证的普遍规律。\n",
+    "---\n{\n  \"id\": \"cross-session-reasoning-state\",\n  \"atom\": \"把可恢复的结论、证据范围、未决问题和下一入口持久化，使后续会话能续接推理而不把历史假设当成事实。\",\n  \"layer\": 2,\n  \"domain\": [\n    \"engineering\"\n  ],\n  \"confidence\": \"hypothetical\",\n  \"source\": \"synthesis\",\n  \"triggers\": [\n    \"checkpoint\",\n    \"frontier\",\n    \"跨会话\",\n    \"推理恢复\",\n    \"会话快照\"\n  ],\n  \"edges\": [\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"agent\",\n      \"confidence\": \"hypothetical\"\n    },\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"context\",\n      \"confidence\": \"hypothetical\"\n    },\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"goal\",\n      \"confidence\": \"hypothetical\"\n    }\n  ]\n}\n---\n\n# 跨会话推理状态\n\n## 核心内容（molecule）\n\n会话结束后，主体的工作上下文不一定保留。跨会话推理状态把继续达成目标所需的信息外置，保留已确认结论、探索范围、未解决问题与恢复入口。其对象是可续接的推理任务，不是对所有对话逐字归档。\n\n快照回答已经得到了什么、凭什么、在什么语境中成立；边界记录回答尚不知道什么、为何值得继续。恢复时应先检查时效和前提变化，再决定哪些结论可以沿用。历史记录只能提供待核实的起点，不能自动取得比当前证据更高的权威。\n\nx-sage 通过 checkpoint 的 established、exploredEdges、frontier、nextEntryPoint 保存结构化状态；知识库 frontier 是跨会话未决边界。与 decision-traceability 的区别是：后者解释某个决策为何作出，前者恢复包括未决探索在内的工作状态，并不要求已作出决策。\n\n## 张力与开放问题\n\n压缩会丢失细节，全量保留又会重新占满上下文。保存时应标注证据和日期，并保持假设与已确认结论分离，避免多次转述逐渐放大置信度。\n\n## 激活建议\n\n先加载定义前提：[agent, context, goal]。需要具体实现案例时再加载 x-sage-concept-kb；该实例不是定义前提。\n\n## 来源与状态\n\n2026-11-16 从 x-sage 项目架构、边语义文档及已确认项目总览提炼。候选拆分及边尚待审阅，hypothetical 不表示已验证的普遍规律。\n",
+    "---\n{\n  \"id\": \"reviewed-knowledge-writeback\",\n  \"atom\": \"将知识修订先保存为带理由和基线的候选，经审阅与并发检查后成为正式知识，使写入能力与可信发布分离。\",\n  \"layer\": 2,\n  \"domain\": [\n    \"engineering\"\n  ],\n  \"confidence\": \"hypothetical\",\n  \"source\": \"synthesis\",\n  \"triggers\": [\n    \"知识写回\",\n    \"提案\",\n    \"review\",\n    \"revision\",\n    \"并发冲突\",\n    \"refine-body\"\n  ],\n  \"edges\": [\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"agent\",\n      \"confidence\": \"hypothetical\"\n    },\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"constraint\",\n      \"confidence\": \"hypothetical\"\n    },\n    {\n      \"type\": \"depends-on\",\n      \"target\": \"risk\",\n      \"confidence\": \"hypothetical\"\n    }\n  ]\n}\n---\n\n# 审阅式知识写回\n\n## 核心内容（molecule）\n\n主体能够提出知识修订，不等于修订已经得到验证。审阅式写回把候选生成、证据审查和正式应用分开，约束未经核实的内容直接成为后续推理基础。修订理由说明为何改变，版本基线说明针对哪份知识改变，两者回答不同问题。\n\n读取现有版本，形成明确范围的候选，比较差异和证据，再在基线未发生变化时应用。若基线变化，应重新理解冲突并重提，不应静默覆盖。审阅许可与版本一致性相互独立：版本未变不能证明内容正确，内容正确也不能证明可以覆盖他人修改。\n\nx-sage 用边、atom 和正文提案承载不同粒度的修改；正文提案通过 expectedRevision 防止并发覆盖，合并时保留 frontmatter。该保护应按实际接口能力描述，不能假定每种提案都有相同版本机制。正式概念、候选和 checkpoint 是不同状态，保存候选并不意味着进入可激活概念图。\n\n## 张力与开放问题\n\n审阅提高可信度，但也增加积压与延迟。需要保留待处理状态和失败原因；不能为了减少积压而省略审查，也不能把机械校验通过等同于语义验证。\n\n## 激活建议\n\n先加载定义前提：[agent, constraint, risk]。需要具体实现案例时再加载 x-sage-concept-kb；该实例不是定义前提。\n\n## 来源与状态\n\n2026-11-16 从 x-sage 项目架构、边语义文档及已确认项目总览提炼。候选拆分及边尚待审阅，hypothetical 不表示已验证的普遍规律。\n"
+  ],
+  "exploredEdges": [],
+  "frontier": [
+    {
+      "id": "definition-dependency-layering",
+      "reason": "待审阅候选定义及关系；当前 REST 不支持新增完整概念，尚未进入正式图。",
+      "priority": "medium"
+    },
+    {
+      "id": "budgeted-concept-activation",
+      "reason": "待审阅候选定义及关系；当前 REST 不支持新增完整概念，尚未进入正式图。",
+      "priority": "medium"
+    },
+    {
+      "id": "typed-relation-reasoning",
+      "reason": "待审阅候选定义及关系；当前 REST 不支持新增完整概念，尚未进入正式图。",
+      "priority": "medium"
+    },
+    {
+      "id": "cross-session-reasoning-state",
+      "reason": "待审阅候选定义及关系；当前 REST 不支持新增完整概念，尚未进入正式图。",
+      "priority": "medium"
+    },
+    {
+      "id": "reviewed-knowledge-writeback",
+      "reason": "待审阅候选定义及关系；当前 REST 不支持新增完整概念，尚未进入正式图。",
+      "priority": "medium"
+    }
+  ],
+  "nextEntryPoint": "审阅五个 L2 草案，再通过受支持的概念创建流程入库；不要对不存在的目标提交正式边。"
+}

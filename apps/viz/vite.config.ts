@@ -19,6 +19,7 @@ export default defineConfig({
     // The browser only ever talks to one origin: Vite forwards /api to the
     // server, so no CORS preflight and no hard-coded port in client code.
     proxy: {
+      "/sage.v1.SageCommandService/": { target: API_TARGET, changeOrigin: true },
       "/api": {
         target: API_TARGET,
         changeOrigin: true,

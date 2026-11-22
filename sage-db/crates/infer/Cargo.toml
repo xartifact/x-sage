@@ -1,0 +1,18 @@
+[package]
+name = "sage-db-infer"
+description = "sage-db optimized inference executor over an immutable base graph; no I/O"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sage-db-types.workspace = true
+
+[dev-dependencies]
+# 只用于 T4/T5 的差分测试；`reference` 永远不是生产依赖。
+sage-db-reference.workspace = true

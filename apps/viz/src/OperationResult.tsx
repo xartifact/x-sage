@@ -43,6 +43,19 @@ export default function OperationResult({ value }: { value: unknown }) {
   if (!value || typeof value !== "object")
     return <p className="text-sm text-muted-foreground">{String(value)}</p>;
   const result = object(value);
+  if (result.recorded && typeof object(result.recorded).commitVersion === "string") {
+    const statuses: Record<string, string> = {
+      PROPOSAL_STATUS_APPROVED: "提案已合并",
+      PROPOSAL_STATUS_REJECTED: "提案已拒绝",
+      PROPOSAL_STATUS_CONFLICTED: "提案基线已过期，未应用修改",
+    };
+    const message = statuses[String(result.status)] ?? "请求已提交";
+    return (
+      <Notice warning={result.status === "PROPOSAL_STATUS_CONFLICTED"}>
+        {message}（版本 {String(object(result.recorded).commitVersion)}）
+      </Notice>
+    );
+  }
   if (typeof result.diff === "string")
     return (
       <section className="space-y-3">

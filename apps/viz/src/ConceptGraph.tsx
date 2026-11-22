@@ -1,8 +1,8 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Maximize2, RotateCcw, Network } from "lucide-react";
+import { Maximize2, Minus, Plus, RotateCcw, Network } from "lucide-react";
 import * as d3 from "d3";
-import { LAYER_COLORS, NODE_RADIUS, EDGE_COLORS } from "./types";
+import { conceptName, LAYER_COLORS, NODE_RADIUS, EDGE_COLORS } from "./types";
 import type { GraphNode, GraphEdge, Layer, EdgeType } from "./types";
 
 interface SimulationNode extends GraphNode, d3.SimulationNodeDatum {
@@ -12,7 +12,6 @@ interface SimulationNode extends GraphNode, d3.SimulationNodeDatum {
 interface SimulationEdge extends d3.SimulationLinkDatum<SimulationNode> {
   from: string;
   type: EdgeType;
-  target: string;
   confidence: string;
 }
 
@@ -53,10 +52,9 @@ function fittedView(nodes: SimulationNode[]): string {
   ].join(" ");
 }
 
-function getChineseName(node: GraphNode): string {
-  const match = node.molecule.match(/^#\s+(.+)$/m);
-  if (match && match[1]) return match[1];
-  return node.id;
+function graphLabel(node: GraphNode): string {
+  const title = conceptName(node).replace(/(?<=\p{Script=Han})\s+[A-Z].*$/u, "");
+  return title.length > 14 ? title.slice(0, 13) + "…" : title;
 }
 
 export default function ConceptGraph({
@@ -232,31 +230,47 @@ export default function ConceptGraph({
     setView(fittedView(simNodes));
   };
 
-  // Compute neighbor sets for hover highlight
+  const defaultView = `0 0 ${dimensions.width} ${dimensions.height}`;
+  function zoom(factor: number) {
+    setView((previous) => {
+      const [x = 0, y = 0, width = dimensions.width, height = dimensions.height] =
+        (previous ?? defaultView).split(" ").map(Number);
+      const nextWidth = width * factor;
+      const nextHeight = height * factor;
+      if (nextWidth < dimensions.width / 6 || nextWidth > dimensions.width * 12) {
+        return previous;
+      }
+      return [x + (width - nextWidth) / 2, y + (height - nextHeight) / 2, nextWidth, nextHeight].join(" ");
+    });
+  }
+
+  const highlightedNodeId = hoveredNodeId ?? selectedNodeId;
+
+  // Keep a selected concept and its connections in context after the pointer leaves.
   const neighborSet = useMemo(() => {
-    if (!hoveredNodeId) return new Set<string>();
-    const neighbors = new Set<string>([hoveredNodeId]);
+    if (!highlightedNodeId) return new Set<string>();
+    const neighbors = new Set<string>([highlightedNodeId]);
     simEdges.forEach((e) => {
       const src = getNodeId(e.source);
       const tgt = getNodeId(e.target);
-      if (src === hoveredNodeId) neighbors.add(tgt);
-      if (tgt === hoveredNodeId) neighbors.add(src);
+      if (src === highlightedNodeId) neighbors.add(tgt);
+      if (tgt === highlightedNodeId) neighbors.add(src);
     });
     return neighbors;
-  }, [hoveredNodeId, simEdges]);
+  }, [highlightedNodeId, simEdges]);
 
   const edgeHighlighted = useMemo(() => {
-    if (!hoveredNodeId) return new Set<number>();
+    if (!highlightedNodeId) return new Set<number>();
     const highlighted = new Set<number>();
     simEdges.forEach((e, idx) => {
       const src = getNodeId(e.source);
       const tgt = getNodeId(e.target);
-      if (src === hoveredNodeId || tgt === hoveredNodeId) {
+      if (src === highlightedNodeId || tgt === highlightedNodeId) {
         highlighted.add(idx);
       }
     });
     return highlighted;
-  }, [hoveredNodeId, simEdges]);
+  }, [highlightedNodeId, simEdges]);
 
   const handleSvgClick = useCallback(
     (e: React.MouseEvent) => {
@@ -287,9 +301,13 @@ export default function ConceptGraph({
   return (
     <div
       ref={containerRef}
-      className="relative h-full min-h-80 w-full overflow-hidden bg-muted/20"
+      className="sage-graph-canvas"
     >
-      <div className="absolute right-3 top-3 z-10 flex gap-1 rounded-lg border bg-background/95 p-1 shadow-sm">
+      <div className="sage-map-controls">
+        <Button variant="ghost" size="icon" onClick={() => zoom(0.8)} disabled={!simNodes.length}
+          aria-label="放大图谱" title="放大图谱"><Plus className="size-4" /></Button>
+        <Button variant="ghost" size="icon" onClick={() => zoom(1.25)} disabled={!simNodes.length}
+          aria-label="缩小图谱" title="缩小图谱"><Minus className="size-4" /></Button>
         <Button
           variant="ghost"
           size="icon"
@@ -321,7 +339,7 @@ export default function ConceptGraph({
         ref={svgRef}
         className="graph-svg h-full w-full touch-none"
         aria-label="知识概念关系图"
-        viewBox={view ?? `0 0 ${dimensions.width} ${dimensions.height}`}
+        viewBox={view ?? defaultView}
         onClick={handleSvgClick}
       >
         <defs>
@@ -331,7 +349,7 @@ export default function ConceptGraph({
               key={type}
               id={`arrow-${type}`}
               viewBox="0 -5 10 10"
-              refX={type === "contradicts" ? 28 : 22}
+              refX={9}
               refY={0}
               /* Symmetric relations render undirected; an arrowhead would imply
                  a direction the relation does not have. */
@@ -353,18 +371,23 @@ export default function ConceptGraph({
             const tgtCoords = getNodeCoords(edge.target);
 
             const isHighlighted = edgeHighlighted.has(idx);
-            const isDimmed = hoveredNodeId && !isHighlighted;
-            const opacity = isDimmed ? 0.05 : isHighlighted ? 1.0 : 0.6;
-            const strokeWidth = isHighlighted ? 2.5 : 1.5;
+            const isDimmed = highlightedNodeId && !isHighlighted;
+            const opacity = isDimmed ? 0.12 : isHighlighted ? 1.0 : 0.50;
+            const strokeWidth = isHighlighted ? 2.25 : 1.25;
+            const dx = tgtCoords.x - srcCoords.x;
+            const dy = tgtCoords.y - srcCoords.y;
+            const targetRadius = typeof edge.target === "object" ? NODE_RADIUS[edge.target.layer] * 0.54 : 0;
+            const length = Math.hypot(dx, dy);
+            const trim = length > targetRadius ? targetRadius / length : 0;
 
             return (
               <line
-                key={`${edge.from}-${edge.type}-${edge.target}-${idx}`}
+                key={`${edge.from}-${edge.type}-${getNodeId(edge.target)}-${idx}`}
                 className="graph-edge"
                 x1={srcCoords.x}
                 y1={srcCoords.y}
-                x2={tgtCoords.x}
-                y2={tgtCoords.y}
+                x2={tgtCoords.x - dx * trim}
+                y2={tgtCoords.y - dy * trim}
                 stroke={EDGE_COLORS[edge.type]}
                 strokeWidth={strokeWidth}
                 strokeOpacity={opacity}
@@ -387,10 +410,10 @@ export default function ConceptGraph({
             const isHovered = hoveredNodeId === node.id;
             const isNeighbor = neighborSet.has(node.id);
             const isSelected = selectedNodeId === node.id;
-            const isDimmed = hoveredNodeId && !isNeighbor;
-            const opacity = isDimmed ? 0.15 : 1.0;
-            const radius = NODE_RADIUS[node.layer];
-            const strokeWidth = isSelected ? 4 : isHovered ? 3 : 2;
+            const isDimmed = highlightedNodeId && !isNeighbor;
+            const opacity = isDimmed ? 0.3 : 1.0;
+            const showLabel = isHovered || isSelected || (!isDimmed && (dimensions.width > 460 || node.layer < 2));
+            const radius = NODE_RADIUS[node.layer] * 0.54;
 
             return (
               <g
@@ -402,7 +425,7 @@ export default function ConceptGraph({
                 onMouseLeave={handleNodeLeave}
                 role="button"
                 tabIndex={0}
-                aria-label={getChineseName(node)}
+                aria-label={conceptName(node)}
                 aria-pressed={isSelected}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
@@ -423,22 +446,17 @@ export default function ConceptGraph({
                 }}
               >
                 <circle
+                  className="sage-node-halo"
+                  r={radius + 5}
+                  fill={LAYER_COLORS[node.layer]}
+                  opacity={isSelected ? 0.32 : isHovered ? 0.24 : 0.13}
+                />
+                <circle
                   className="node-circle"
                   r={radius}
                   fill={LAYER_COLORS[node.layer]}
-                  stroke={isSelected ? "#ffffff" : "#ffffff"}
-                  strokeWidth={strokeWidth}
-                  style={{
-                    filter: isSelected
-                      ? "drop-shadow(0 0 8px rgba(255,255,255,0.6))"
-                      : undefined,
-                  }}
                 />
-                <text className="node-label" dy={1}>
-                  {getChineseName(node).length > 12
-                    ? getChineseName(node).slice(0, 12) + "…"
-                    : getChineseName(node)}
-                </text>
+                {showLabel && <text className="node-label" y={radius + 15}>{graphLabel(node)}</text>}
               </g>
             );
           })}

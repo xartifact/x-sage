@@ -36,27 +36,7 @@ export async function listEdgeProposals(proposalsDir: string): Promise<EdgePropo
     if (!file.endsWith(".md")) continue;
     const filePath = join(edgesDir, file);
     const raw = await readFile(filePath, "utf-8");
-    const { data, content } = matter(raw);
-
-    const fromMatch = content.match(/- \*\*from\*\*: (.+)/);
-    const typeMatch = content.match(/- \*\*type\*\*: (.+)/);
-    const targetMatch = content.match(/- \*\*target\*\*: (.+)/);
-    const confidenceMatch = content.match(/- \*\*confidence\*\*: (.+)/);
-
-    const from = fromMatch && fromMatch.length > 1 ? fromMatch[1]! : "";
-    const type = typeMatch && typeMatch.length > 1 ? typeMatch[1]! : "";
-    const target = targetMatch && targetMatch.length > 1 ? targetMatch[1]! : "";
-    const confidence = confidenceMatch && confidenceMatch.length > 1 ? confidenceMatch[1]! : "";
-
-    proposals.push({
-      file,
-      from,
-      type,
-      target,
-      confidence,
-      status: typeof data.status === "string" ? data.status : "",
-      date: typeof data.date === "string" ? data.date : "",
-    });
+    proposals.push(parseEdgeProposal(file, raw));
   }
 
   return proposals;
@@ -77,23 +57,53 @@ export async function listAtomProposals(proposalsDir: string): Promise<AtomPropo
     if (!file.endsWith(".md")) continue;
     const filePath = join(atomsDir, file);
     const raw = await readFile(filePath, "utf-8");
-    const { data, content } = matter(raw);
-
-    const currentAtomMatch = content.match(/## 当前 atom\s*\n(.+?)(?=\n## |$)/s);
-    const proposedAtomMatch = content.match(/## 建议新 atom\s*\n(.+?)(?=\n## |$)/s);
-
-    const currentAtom = currentAtomMatch && currentAtomMatch.length > 1 ? currentAtomMatch[1]!.trim() : "";
-    const proposedAtom = proposedAtomMatch && proposedAtomMatch.length > 1 ? proposedAtomMatch[1]!.trim() : "";
-
-    proposals.push({
-      file,
-      conceptId: typeof data.concept === "string" ? data.concept : "",
-      currentAtom,
-      proposedAtom,
-      status: typeof data.status === "string" ? data.status : "",
-      date: typeof data.date === "string" ? data.date : "",
-    });
+    proposals.push(parseAtomProposal(file, raw));
   }
 
   return proposals;
+}
+
+/** The legacy public row projected from one exact proposal document. */
+export function parseEdgeProposal(file: string, raw: string): EdgeProposal {
+  const { data, content } = matter(raw);
+
+  const fromMatch = content.match(/- \*\*from\*\*: (.+)/);
+  const typeMatch = content.match(/- \*\*type\*\*: (.+)/);
+  const targetMatch = content.match(/- \*\*target\*\*: (.+)/);
+  const confidenceMatch = content.match(/- \*\*confidence\*\*: (.+)/);
+
+  const from = fromMatch && fromMatch.length > 1 ? fromMatch[1]! : "";
+  const type = typeMatch && typeMatch.length > 1 ? typeMatch[1]! : "";
+  const target = targetMatch && targetMatch.length > 1 ? targetMatch[1]! : "";
+  const confidence = confidenceMatch && confidenceMatch.length > 1 ? confidenceMatch[1]! : "";
+
+  return {
+    file,
+    from,
+    type,
+    target,
+    confidence,
+    status: typeof data.status === "string" ? data.status : "",
+    date: typeof data.date === "string" ? data.date : "",
+  };
+}
+
+/** The legacy public row projected from one exact proposal document. */
+export function parseAtomProposal(file: string, raw: string): AtomProposal {
+  const { data, content } = matter(raw);
+
+  const currentAtomMatch = content.match(/## 当前 atom\s*\n(.+?)(?=\n## |$)/s);
+  const proposedAtomMatch = content.match(/## 建议新 atom\s*\n(.+?)(?=\n## |$)/s);
+
+  const currentAtom = currentAtomMatch && currentAtomMatch.length > 1 ? currentAtomMatch[1]!.trim() : "";
+  const proposedAtom = proposedAtomMatch && proposedAtomMatch.length > 1 ? proposedAtomMatch[1]!.trim() : "";
+
+  return {
+    file,
+    conceptId: typeof data.concept === "string" ? data.concept : "",
+    currentAtom,
+    proposedAtom,
+    status: typeof data.status === "string" ? data.status : "",
+    date: typeof data.date === "string" ? data.date : "",
+  };
 }

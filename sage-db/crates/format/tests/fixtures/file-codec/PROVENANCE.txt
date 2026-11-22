@@ -1,0 +1,9 @@
+# Provenance: copied verbatim from immutable D10 evidence/vectors.
+# Source: /tmp/sage-db-p1.2yjLG4/format-contract/DELIVERY-10/evidence/vectors
+bbed976c48ff4419bdb93d080458bb2ae62b70d3ca2a85e4eb47cc5524239378  golden.genesis.current
+8be1beb5fd3f453e62d703f7061a11f52dc7a61586bf2c01b808355f9dec3f5b  golden.genesis.manifest.sgm
+2a185bd2dc8c4fdefa5d9cbd30260bb1faf84c84ebdd0dea85aed4cceab2f5f4  golden.genesis.tx.sgl
+f9af576fdc9a5dcc146161f1d2445c7f9fabb4fe9aabb4e41f987002f51e46bd  golden.v2.current
+46e718c8703b95565888fe7668b5c6b07d6a8bb0f64d856adc3a5d2651ec5ec7  golden.v2.manifest.sgm
+3ffc2989001f694fbc63f0182dc32657cd859697455987f0fc74bbe55237b109  golden.v2.tx.sgl
+9bf4c27a088cdc0a72081d54ec08aff6d2833d4415055d310ae9e82c2b67cb33  golden.v3.current

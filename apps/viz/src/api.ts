@@ -10,7 +10,8 @@ export async function api(
   token = "",
   signal?: AbortSignal,
 ) {
-  const url = new URL(`${base}/api${path}`, window.location.origin);
+  const route = path.startsWith("/sage.v1.SageCommandService/") ? path : `/api${path}`;
+  const url = new URL(`${base}${route}`, window.location.origin);
   if (kb) url.searchParams.set("kb", kb);
   const res = await fetch(url, {
     method,

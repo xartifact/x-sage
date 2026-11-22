@@ -118,6 +118,12 @@ export async function addFrontierEntry(kbPath: string, entry: FrontierEntry): Pr
     throw new Error(`frontier.md not found in ${kbPath}`);
   }
 
+  const next = appendFrontierRow(raw, entry);
+  if (next !== raw) await writeFileAtomic(filePath, next);
+}
+
+/** Keep the original document and append to the first pending-concepts table. */
+export function appendFrontierRow(raw: string, entry: FrontierEntry): string {
   const lines = raw.split("\n");
   const tableStart = lines.findIndex((line) => line.startsWith("| 概念"));
   if (tableStart === -1) {
@@ -138,9 +144,9 @@ export async function addFrontierEntry(kbPath: string, entry: FrontierEntry): Pr
 
   const row = formatRow(entry);
   if (lines.slice(tableStart, lastRow + 1).some((line) => line === row)) {
-    return; // already present; adding it twice is not a second pending item
+    return raw; // already present; adding it twice is not a second pending item
   }
 
   lines.splice(lastRow + 1, 0, row);
-  await writeFileAtomic(filePath, lines.join("\n"));
+  return lines.join("\n");
 }

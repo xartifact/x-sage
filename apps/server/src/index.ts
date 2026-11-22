@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 import { resolve, join } from "node:path";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createApp } from "./app.ts";
+import { connectNativeStartup } from "./native-startup.ts";
 
 /**
  * Entry point for the HTTP server.
@@ -19,19 +20,28 @@ import { createApp } from "./app.ts";
  * In development the Vite dev server proxies /api here, so the browser sees one
  * origin. In production this process serves both the API and the built assets.
  */
-const kbRoot = resolve(process.env.X_SAGE_KB ?? resolve(import.meta.dir, "../../../kb/default"));
+const kbRoot = resolve(process.env.X_SAGE_DB_MODE === undefined
+  ? process.env.X_SAGE_KB ?? resolve(import.meta.dir, "../../../kb/default")
+  : "/var/empty/x-sage-authority");
 const port = Number.parseInt(process.env.PORT ?? "3001", 10);
 const hostname = process.env.HOST ?? "127.0.0.1";
 const corsOrigin = process.env.CORS_ORIGIN;
 const defaultDist = resolve(import.meta.dir, "../../viz/dist");
 const webDist = resolve(process.env.X_SAGE_WEB_DIST ?? defaultDist);
 
-if (!existsSync(kbRoot)) {
+const writeTokenFile = process.env.X_SAGE_WRITE_TOKEN_FILE;
+if (writeTokenFile !== undefined && process.env.X_SAGE_WRITE_TOKEN !== undefined) {
+  throw new Error("Configure the Bun public write token using one source");
+}
+const writeToken = writeTokenFile === undefined
+  ? process.env.X_SAGE_WRITE_TOKEN
+  : readFileSync(writeTokenFile, "utf8").trim();
+
+const native = await connectNativeStartup(process.env, hostname, writeToken);
+if (!native && !existsSync(kbRoot)) {
   console.error(`KB directory not found: ${kbRoot}`);
   process.exit(1);
 }
-
-const writeToken = process.env.X_SAGE_WRITE_TOKEN;
 
 // A server reachable from another machine must not accept anonymous writes. The
 // bind address is the only signal available here, so refusing to start is safer
@@ -46,7 +56,9 @@ if (writeToken === undefined && hostname !== "127.0.0.1" && hostname !== "localh
 
 const app = createApp({
   kbRoot,
-  registryPath: process.env.X_SAGE_REGISTRY ?? (process.env.X_SAGE_KB ? undefined : resolve(import.meta.dir, "../../../registry.json")),
+  ...(native
+    ? { nativeTermReader: native.reader, nativeHealth: native.health }
+    : { registryPath: process.env.X_SAGE_REGISTRY ?? (process.env.X_SAGE_KB ? undefined : resolve(import.meta.dir, "../../../registry.json")) }),
   ...(corsOrigin === undefined ? {} : { corsOrigin }),
   ...(writeToken === undefined ? {} : { writeToken }),
 });

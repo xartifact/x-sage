@@ -1,0 +1,166 @@
+{
+  "generator": "natgen.py",
+  "provenance": "Independently authored from docs/design/storage-format.md tables; not produced by the Rust encoder under test.",
+  "cases": [
+    {
+      "name": "asset-min",
+      "file": "asset-min.hex",
+      "bytes": 98,
+      "sha256": "808144daedf93e2b7c1901e07ce724c72c1214fb54e9ff942146803f4e36815b",
+      "event_tag": 64,
+      "note": "minimum: origin 2 so recorded_by absent; no declared_by/at, no extensions"
+    },
+    {
+      "name": "asset-full",
+      "file": "asset-full.hex",
+      "bytes": 1003,
+      "sha256": "2cc6ae6771b01ddf9526eb88aa197faebb02e10ebd5e0bcd53e58f22df3deabe",
+      "event_tag": 64,
+      "note": "all optional fields present at their declared maxima"
+    },
+    {
+      "name": "kbmeta-min",
+      "file": "kbmeta-min.hex",
+      "bytes": 154,
+      "sha256": "55de44ffa0e944d9b80e268ca4e83df974034734846e81b1ed92b16088786f04",
+      "event_tag": 144,
+      "note": "empty description and empty domains list are legal (upper bounds only)"
+    },
+    {
+      "name": "kbmeta-full",
+      "file": "kbmeta-full.hex",
+      "bytes": 16999,
+      "sha256": "d6f12d1c32f8f057aca50806cfc2fdf3bccf2ec185b6c594c417820db67a3f99",
+      "event_tag": 144,
+      "note": "author-order preserved for domains; changed_fields ascending"
+    },
+    {
+      "name": "model-registered-min",
+      "file": "model-registered-min.hex",
+      "bytes": 110,
+      "sha256": "e2a81a5a28988c2a925064d9faae8d970b93d43905abcd726109f0346adf35be",
+      "event_tag": 145,
+      "note": "registration: revision 1, status active, no tag 9"
+    },
+    {
+      "name": "model-updated",
+      "file": "model-updated.hex",
+      "bytes": 316,
+      "sha256": "78a0307978ed3334265f1ae72df20e9e390a00eaf384f4125f27bdd6d4802ad1",
+      "event_tag": 146,
+      "note": "146 may explicitly retire (status 1) and revive later; full after-image"
+    },
+    {
+      "name": "model-retired",
+      "file": "model-retired.hex",
+      "bytes": 139,
+      "sha256": "49643c9005e1871901a520fd5f7e851ebd7ccce25d970e1373591749c55cb7d8",
+      "event_tag": 147,
+      "note": "retirement: status must be 1, reason mandatory"
+    },
+    {
+      "name": "ruleprofile-changed",
+      "file": "ruleprofile-changed.hex",
+      "bytes": 197,
+      "sha256": "732fba076c0de4dbad273be02563d7dbc364d86f0f70b934c2808ed2a9c4c906",
+      "event_tag": 160,
+      "note": "from/to differ; reason mandatory; 163+166 binding"
+    },
+    {
+      "name": "ruleprofile-dry-run",
+      "file": "ruleprofile-dry-run.hex",
+      "bytes": 271,
+      "sha256": "59a5e23cd0a294c81d35d9613b4a06369d5752f7dae4fc452a567502492c5065",
+      "event_tag": 160,
+      "note": "conditional 162 present; same-profile migration is legal"
+    },
+    {
+      "name": "idalloc-zero",
+      "file": "idalloc-zero.hex",
+      "bytes": 40,
+      "sha256": "7ccd85364771c634831d9dd135362d49de1a9131aa4e0c8e06370c759d6ded9e",
+      "event_tag": 176,
+      "note": "genesis term watermark; 16-byte u128, not u64"
+    },
+    {
+      "name": "idalloc-term-max",
+      "file": "idalloc-term-max.hex",
+      "bytes": 40,
+      "sha256": "9963d869792354cd968c7ecc0410ee308ff8ea467c2e72d764143bc0b6c7730c",
+      "event_tag": 176,
+      "note": "term space bound is u32::MAX, encoded in 16 bytes"
+    },
+    {
+      "name": "idalloc-u128-max",
+      "file": "idalloc-u128-max.hex",
+      "bytes": 40,
+      "sha256": "e70b45504d0f9ac184281acc5f843f50165ad367298e23df5a78ee24f67d50cf",
+      "event_tag": 176,
+      "note": "session-checkpoint space bound is u128::MAX"
+    },
+    {
+      "name": "outcome-min",
+      "file": "outcome-min.hex",
+      "bytes": 184,
+      "sha256": "8cf4accc3e2a913ac9b624f54c8ef2ed89539fb4d03a9c204aea9f4ad48e6d63",
+      "event_tag": 192,
+      "note": "v2: no revision, no status, no tag 9; origin 1 with recorded_by present, because row 192 requires tag 5 unconditionally"
+    },
+    {
+      "name": "outcome-legacy-with-five",
+      "file": "outcome-legacy-with-five.hex",
+      "bytes": 227,
+      "sha256": "620d9a0dcfd451ee945eb11eedbc15091d751bbb210e153a75b222615b4d69df",
+      "event_tag": 192,
+      "note": "v2: origin 1 (legacy_declared) WITH tag 5 -- the conjunction's other positive arm"
+    },
+    {
+      "name": "outcome-full",
+      "file": "outcome-full.hex",
+      "bytes": 8436,
+      "sha256": "0f6ec1b44cfde57724815ca7ca9e4cc7e5bfa0780d553ad9c151084ed2c2e070",
+      "event_tag": 192,
+      "note": "declared maxima for 176/177; commit_version at u64::MAX"
+    },
+    {
+      "name": "import-min",
+      "file": "import-min.hex",
+      "bytes": 193,
+      "sha256": "c64938ee608431ab6314848f4a9f5d73aa2686935438174d411e89f25a23a958",
+      "event_tag": 208,
+      "note": "empty expected_counts is legal (tag 186 has an upper bound only)"
+    },
+    {
+      "name": "import-full",
+      "file": "import-full.hex",
+      "bytes": 332,
+      "sha256": "01453d9bde74444ddfb454f97b39a6c521dc0825449208073cc71033159beb2a",
+      "event_tag": 208,
+      "note": "counts are ROWS (u64), unrelated to watermarks; kind 10/13 rows are not ids"
+    },
+    {
+      "name": "genesis-typical",
+      "file": "genesis-typical.hex",
+      "bytes": 242,
+      "sha256": "c8db6c78e8c9065961bc1d773a929c3a6ba80d150de54df15057bb750efd16dd",
+      "event_tag": 224,
+      "note": "independent genesis image: description and domains differ from the accepted golden"
+    },
+    {
+      "name": "genesis-extended",
+      "file": "genesis-extended.hex",
+      "bytes": 297,
+      "sha256": "60dc59cdbdf2599708ada00d475433fbf33a231bf0080f0642a6501915d84112",
+      "event_tag": 224,
+      "note": "conditional 7 and 14 both present"
+    },
+    {
+      "name": "genesis-accepted",
+      "file": "genesis-accepted.hex",
+      "bytes": 271,
+      "sha256": "d2fe591da77236f3810ae9f91de8c130279219f246af024216b04029a39cab97",
+      "event_tag": 224,
+      "note": "accepted DELIVERY-10 golden Genesis event, re-derived byte-identically by natgen.py"
+    }
+  ]
+}

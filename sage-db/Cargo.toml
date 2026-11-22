@@ -1,0 +1,64 @@
+# sage-db — x-sage 的自研知识图数据库（Rust）。
+#
+# P0 语义层 + P1 存储基础 + P2 业务准入基础（kernel）。
+# store-tests 是独立测试 harness（publish=false），永远不被生产 crate 依赖。
+# 生产依赖由 CI 断言：store -> {types, format}；kernel -> {types, store}。
+# store-tests 消费生产接口；kernel 仅为 harness 的测试依赖。
+# store 永不依赖 infer 或 store-tests（含 dev 边）。
+#
+# 归属约定见 sage-db/README.md。
+
+[workspace]
+# The pinned JSON patch is a dependency, not a workspace member.
+exclude = ["vendor/serde_json"]
+resolver = "3"
+members = [
+    "crates/types",
+    "crates/infer",
+    "crates/reference",
+    "crates/format",
+    "crates/store",
+    "crates/kernel",
+    "crates/server",
+    "crates/protocol",
+    "crates/query",
+    "crates/migrate",
+    "crates/store-tests",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+repository = "https://github.com/xartifact/x-sage"
+publish = false
+
+[workspace.dependencies]
+sage-db-types = { path = "crates/types" }
+sage-db-infer = { path = "crates/infer" }
+sage-db-reference = { path = "crates/reference" }
+sage-db-format = { path = "crates/format" }
+sage-db-store = { path = "crates/store" }
+sage-db-kernel = { path = "crates/kernel" }
+sage-db-server = { path = "crates/server" }
+sage-db-protocol = { path = "crates/protocol" }
+sage-db-query = { path = "crates/query" }
+sage-db-migrate = { path = "crates/migrate" }
+sage-db-store-tests = { path = "crates/store-tests" }
+# Safe fd-relative directory API for the store backend (stable std has no openat).
+# One version workspace-wide; 3.x pinned deliberately so format/store/harness agree.
+cap-std = "3.4.6"
+
+# 门禁即 `cargo clippy --workspace --all-targets -- -D warnings`：
+# 因此这里的 warn 实际都是 error。共享契约 crate 不允许 unsafe，公开项必须有文档。
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# Admission mode has a narrow reviewed patch over pinned serde_json 1.0.154.
+[patch.crates-io]
+serde_json = { path = "vendor/serde_json" }

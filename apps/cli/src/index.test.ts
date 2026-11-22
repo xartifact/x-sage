@@ -732,3 +732,81 @@ describe("knowledge commands", () => {
     }
   });
 });
+
+describe("native commands", () => {
+  test("forwards literal request bytes with auth over exactly one RPC", async () => {
+    const raw = '{\n "envelope":{ "requestId":"q","requestId":"q2" },\n "payload":{}\n}\n';
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        requests++;
+        expect(new URL(request.url).pathname).toBe("/sage.v1.SageCommandService/SubmitProposal");
+        expect(request.method).toBe("POST");
+        expect(request.headers.get("authorization")).toBe("Bearer author");
+        expect(request.headers.get("content-type")).toBe("application/json");
+        expect(await request.text()).toBe(raw);
+        return Response.json({ error: "duplicate field" }, { status: 400 });
+      },
+    });
+    try {
+      const result = await run(["--server", server.url.href, "--token", "author", "native", "submit", "-"], {}, raw);
+      expect(requests).toBe(1);
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(JSON.parse(result.stderr)).toEqual({ error: "duplicate field" });
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("uses exit 2 for an unconfirmed write or an incomplete outcome lookup", async () => {
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        requests++;
+        const path = new URL(request.url).pathname;
+        if (path.endsWith("/CommitCommand")) return Response.json({ outcome: { unknown: { requestId: "r" } } });
+        expect(path).toBe("/sage.v1.SageCommandService/GetRequestOutcome");
+        return Response.json({ incomplete: { reason: "unavailable" } });
+      },
+    });
+    try {
+      const args = ["--server", server.url.href, "native"];
+      const request = '{"envelope":{"requestId":"r"}}';
+      const commit = await run([...args, "commit", "-"], {}, request);
+      const outcome = await run([...args, "outcome", "-"], {}, request);
+      expect(commit.exitCode).toBe(2);
+      expect(outcome.exitCode).toBe(2);
+      expect(JSON.parse(commit.stdout).outcome.unknown.requestId).toBe("r");
+      expect(JSON.parse(outcome.stdout).incomplete.reason).toBe("unavailable");
+      expect(requests).toBe(2);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("reads one native checkpoint by explicit session", async () => {
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        requests++;
+        const url = new URL(request.url);
+        expect(request.method).toBe("GET");
+        expect(url.pathname).toBe("/api/knowledge/checkpoints/agent");
+        expect(url.searchParams.get("session")).toBe("2");
+        return Response.json({ session: 2, content: "saved" });
+      },
+    });
+    try {
+      const result = await run(["--server", server.url.href, "native", "checkpoint", "agent", "2"]);
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({ session: 2, content: "saved" });
+      expect(requests).toBe(1);
+    } finally {
+      server.stop(true);
+    }
+  });
+});

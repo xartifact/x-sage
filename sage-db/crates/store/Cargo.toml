@@ -1,0 +1,31 @@
+[package]
+name = "sage-db-store"
+description = "sage-db narrow filesystem seam, names, locks and durable publication primitives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+sage-db-types.workspace = true
+sage-db-format.workspace = true
+# fd-relative path resolution (openat semantics) through a safe wrapper: stable std
+# exposes no `openat`, and `std::fs::Dir` is nightly-only. Being safe keeps the
+# workspace lint `unsafe_code = forbid` intact, with no local exception.
+cap-std.workspace = true
+# A shared, owned snapshot handle whose construction can FAIL. Stable std exposes no
+# fallible `Rc::try_new`/`Arc::try_new` (both are `allocator_api`, unstable on the pinned
+# 1.98.1), and `Arc<[T]>::try_from(Vec)` still self-allocates its control block. `triomphe`
+# provides a safe `Arc::try_new` that really calls `alloc` and returns Err on null, so the
+# publish path can refuse instead of aborting. Exact pin, and `default-features = false`
+# keeps `serde`/`stable_deref_trait` out: the tree is this crate alone.
+triomphe = { version = "=0.1.17", default-features = false, features = ["std"] }
+
+# Dependency direction is asserted by CI:
+#   store -> {types, format} only.
+#   store must NEVER depend on sage-db-infer (no inference in the store) and never
+#   on sage-db-store-tests in any edge, including dev-dependencies.
+
+[lints]
+workspace = true

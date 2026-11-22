@@ -1,0 +1,17 @@
+[package]
+name = "sage-db-kernel"
+description = "sage-db business admission: capability isolation and object revision checks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sage-db-types.workspace = true
+sage-db-store.workspace = true
+# Canonical graph admission, authorized by system.md section 3.
+sage-db-infer.workspace = true

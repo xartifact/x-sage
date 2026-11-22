@@ -1,0 +1,29 @@
+[package]
+name = "sage-db-query"
+description = "P3 exact fact-query use case: complete answers and point facts over one snapshot view"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Direction, asserted by CI like the rest of the workspace:
+# query -> {types, infer}. No Store, Kernel, format or reference edge exists, so this
+# crate can be compiled and reasoned about without a filesystem, a commit path or a
+# second graph implementation.
+sage-db-types.workspace = true
+sage-db-infer.workspace = true
+
+[dev-dependencies]
+# The integration tests build a REAL kernel snapshot over a real Store, which is the
+# only way to prove the wrapper works against the production `SnapshotView` adapter
+# rather than a stand-in. This is a dev edge only: the production dependency list
+# above stays {types, infer}.
+sage-db-store.workspace = true
+sage-db-kernel.workspace = true
+sage-db-format.workspace = true
+sage-db-store-tests.workspace = true

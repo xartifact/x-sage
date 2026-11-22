@@ -1,0 +1,30 @@
+[package]
+name = "sage-db-server"
+description = "sage-db server commands and a loopback HTTP/1.1 JSON runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+sage-db-types.workspace = true
+sage-db-kernel.workspace = true
+sage-db-store.workspace = true
+sage-db-protocol.workspace = true
+sage-db-query.workspace = true
+# Mature primitives only; no handwritten crypto.
+sha2 = "0.10.9"
+subtle = { version = "2.6.1", default-features = false }
+
+# The runtime parses one bounded HTTP/1.1 request at a time and emits generated JSON.
+httparse = "=1.10.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+# The visualisation wire format includes a UTC timestamp with milliseconds.
+chrono = { version = "=0.4.45", default-features = false, features = ["alloc"] }
+# Unicode properties for the contextual final sigma in the legacy lowercase search.
+regex-syntax = { version = "=0.8.12", default-features = false, features = ["std", "unicode-bool"] }
+
+[lints]
+workspace = true

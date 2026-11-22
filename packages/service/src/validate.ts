@@ -1,3 +1,4 @@
+import { validateGraph, type Graph } from "@x-sage/core";
 import { loadConcepts } from "./concepts.ts";
 import { validateGraphState, type GraphValidationReport } from "./graph.ts";
 import type { KbContext } from "./kb.ts";
@@ -49,5 +50,17 @@ export async function validateConcepts(
     report.valid = report.valid && graph.valid;
   }
 
+  return report;
+}
+
+/** Validate current database rows. There is no generated graph artifact to compare. */
+export function validateGraphSnapshot(graph: Graph, includeGraph: boolean): ConceptValidationReport {
+  const files = graph.nodes.map(({ filePath }) => filePath).sort().map((filePath) => ({ filePath, valid: true }));
+  const report: ConceptValidationReport = { files, total: files.length, failed: 0, valid: true };
+  if (includeGraph) {
+    const { issues } = validateGraph(graph);
+    report.graph = { issues, staleness: { missing: [], extra: [], nodeDrift: false }, valid: issues.length === 0 };
+    report.valid = report.graph.valid;
+  }
   return report;
 }

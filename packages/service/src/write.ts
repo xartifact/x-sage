@@ -4,7 +4,6 @@ import { withKbLock } from "@x-sage/core";
 import {
   AlreadyMergedError,
   ProposalConflictError,
-  ProposalTargetNotFoundError,
 } from "@x-sage/core/proposals";
 import {
   CheckpointSchema,
@@ -37,6 +36,7 @@ import { formatManifest, generateManifest } from "@x-sage/core/manifest";
 import type { Confidence, EdgeType } from "@x-sage/core";
 import { checkpointsDir, manifestFile, proposalsDir, type KbContext } from "./kb.ts";
 import { findConceptFile } from "./concepts.ts";
+import { mergeProposalFiles } from "./proposal-merge.ts";
 
 /** Highest `-sN` suffix for a concept, or 0 when none exist. */
 async function latestSession(ctx: KbContext, conceptId: string): Promise<number> {
@@ -64,17 +64,22 @@ export async function createCheckpoint(
   session?: number,
 ): Promise<Checkpoint> {
   const effective = session ?? (await latestSession(ctx, conceptId)) + 1;
-  const checkpoint: Checkpoint = {
-    concept: conceptId,
-    session: effective,
+  const checkpoint = emptyCheckpoint(conceptId, effective);
+  await writeCheckpoint(checkpointsDir(ctx), checkpoint);
+  return checkpoint;
+}
+
+/** Create the public empty checkpoint shape for an already selected session. */
+export function emptyCheckpoint(concept: string, session: number): Checkpoint {
+  return {
+    concept,
+    session,
     date: new Date().toISOString().split("T")[0]!,
     established: [],
     exploredEdges: [],
     frontier: [],
     nextEntryPoint: "",
   };
-  await writeCheckpoint(checkpointsDir(ctx), checkpoint);
-  return checkpoint;
 }
 
 /** Read a checkpoint by session, or the latest when session is omitted. */
@@ -210,59 +215,20 @@ export async function mergeProposals(ctx: KbContext, target: string): Promise<Me
 }
 
 async function mergeProposalsLocked(ctx: KbContext, target: string): Promise<MergeOutcome> {
-  const outcome: MergeOutcome = { merged: [], failed: [], conflicts: [], derivedStale: false };
-  const pending = await listProposals(ctx);
-
-  const merge = async (
-    file: string,
-    run: (kbRoot: string, file: string) => Promise<void>,
-    touchesFrontmatter: boolean,
-  ): Promise<void> => {
-    try {
-      await run(ctx.root, file);
-      outcome.merged.push(file);
-      if (touchesFrontmatter) outcome.derivedStale = true;
-    } catch (err) {
-      // A retry after a partial failure must not be reported as an error.
-      if (err instanceof AlreadyMergedError) {
-        outcome.merged.push(file);
-      } else if (err instanceof ProposalConflictError) {
-        outcome.conflicts.push({ file, error: err.message });
-      } else {
-        outcome.failed.push({ file, error: err instanceof Error ? err.message : String(err) });
+  const methods = { edges: mergeEdgeProposal, atoms: mergeAtomProposal, bodies: mergeBodyProposal };
+  return mergeProposalFiles({
+    list: () => listProposals(ctx),
+    async decide({ directory, file }) {
+      try {
+        await methods[directory](ctx.root, file);
+        return { kind: "applied" };
+      } catch (error) {
+        if (error instanceof AlreadyMergedError) return { kind: "alreadyApplied" };
+        if (error instanceof ProposalConflictError) return { kind: "conflict", message: error.message };
+        return { kind: "failed", message: error instanceof Error ? error.message : String(error) };
       }
-    }
-  };
-
-  for (const proposal of pending.edges) {
-    if (target !== "all" && proposal.file !== target) continue;
-    if (target === "all" && proposal.status !== "pending") continue;
-    await merge(proposal.file, mergeEdgeProposal, true);
-  }
-
-  for (const proposal of pending.atoms) {
-    if (target !== "all" && proposal.file !== target) continue;
-    if (target === "all" && proposal.status !== "pending") continue;
-    await merge(proposal.file, mergeAtomProposal, true);
-  }
-
-  // Body proposals merge last. A batch that also updates an atom therefore sees
-  // the post-atom revision and reports a conflict, instead of applying a body
-  // written against the previous atom and silently reverting it.
-  for (const proposal of pending.bodies) {
-    if (target !== "all" && proposal.file !== target) continue;
-    if (target === "all" && proposal.status !== "pending") continue;
-    await merge(proposal.file, mergeBodyProposal, false);
-  }
-
-  if (target !== "all") {
-    const known = [...pending.edges, ...pending.atoms, ...pending.bodies].some(
-      (proposal) => proposal.file === target,
-    );
-    if (!known) throw new ProposalTargetNotFoundError(target);
-  }
-
-  return outcome;
+    },
+  }, target);
 }
 
 /** Render the MANIFEST table without touching disk. */

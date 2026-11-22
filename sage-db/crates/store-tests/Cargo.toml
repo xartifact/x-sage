@@ -1,0 +1,26 @@
+[package]
+name = "sage-db-store-tests"
+description = "Independent filesystem model, crash-state oracle and integration harness (not published)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+# Non-published harness: it consumes the store's narrow seam, never the reverse.
+publish = false
+
+[dependencies]
+sage-db-types.workspace = true
+sage-db-format.workspace = true
+sage-db-store.workspace = true
+
+# Direction: store-tests -> {types, format, store}. `sage-db-store` must NOT depend
+# back on this crate in any edge (normal, build or dev); the CI dependency gate asserts
+# this so the oracle can never be reachable from production code.
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+sage-db-kernel.workspace = true
+sage-db-server.workspace = true
+sage-db-protocol.workspace = true

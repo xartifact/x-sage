@@ -1,0 +1,11 @@
+[package]
+name = "sage-db-types"
+description = "sage-db identity, record, budget, proof and executor contracts; pure, no I/O"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

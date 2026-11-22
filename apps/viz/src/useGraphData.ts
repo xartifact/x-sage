@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { GraphData } from "./types";
 import { api } from "./api";
-export function useGraphData(kb = "") {
+export function useGraphData(kb = "", token = "") {
   const [data, setData] = useState<GraphData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
@@ -20,7 +20,7 @@ export function useGraphData(kb = "") {
           "/viz",
           "GET",
           undefined,
-          "",
+          token,
           controller.signal,
         );
         if (!Array.isArray(next.nodes) || !Array.isArray(next.edges))
@@ -53,6 +53,6 @@ export function useGraphData(kb = "") {
       clearInterval(timer);
       window.removeEventListener("focus", refresh);
     };
-  }, [kb, nonce]);
+  }, [kb, nonce, token]);
   return { data, loading: !data && !error, error, reload, updated };
 }
