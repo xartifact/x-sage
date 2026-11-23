@@ -1121,8 +1121,10 @@ describe("R4-F1: the manifest is bounded by maxArchiveBytes, not maxLineBytes", 
   test("a pretty manifest larger than maxLineBytes is still planned when the verifier accepts it", () => {
     const { archive } = buildArchive("manifestbound", baseFiles());
     const manifestSize = readFileSync(join(archive, "archive.json")).length;
-    // A line ceiling far below the manifest, but above every stream line.
-    const lineCeiling = Math.max(256, Math.floor(manifestSize / 4));
+    // File metadata can change the serialized row size across filesystems.
+    const fileRows = readFileSync(join(archive, "files.ndjson"), "utf8").split("\n");
+    const lineCeiling = Math.max(...fileRows.map((row) => Buffer.byteLength(row)));
+    expect(manifestSize).toBeGreaterThan(lineCeiling);
 
     // Discriminator: the archive verifier accepts this archive under that same
     // maxLineBytes — the manifest is not a "line" as far as the verifier is concerned.
@@ -1143,9 +1145,6 @@ describe("R4-F1: the manifest is bounded by maxArchiveBytes, not maxLineBytes", 
       context: CONTEXT,
     });
     expect(plan.source.extraction).toBe("complete");
-
-    // The manifest really is larger than the line ceiling that used to be applied.
-    expect(manifestSize).toBeGreaterThan(lineCeiling);
   });
 
   test("the manifest is still bounded: maxArchiveBytes refuses an oversized one", () => {
