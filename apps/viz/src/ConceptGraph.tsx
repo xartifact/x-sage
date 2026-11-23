@@ -15,6 +15,8 @@ interface SimulationEdge extends d3.SimulationLinkDatum<SimulationNode> {
   confidence: string;
 }
 
+type ClientPoint = Pick<MouseEvent, "clientX" | "clientY">;
+
 interface ConceptGraphProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -231,18 +233,92 @@ export default function ConceptGraph({
   };
 
   const defaultView = `0 0 ${dimensions.width} ${dimensions.height}`;
-  function zoom(factor: number) {
+  const zoom = useCallback((factor: number, point?: ClientPoint) => {
+    const svg = svgRef.current;
+    let anchorX = 0.5;
+    let anchorY = 0.5;
+    if (svg && point) {
+      const matrix = svg.getScreenCTM();
+      const box = svg.viewBox.baseVal;
+      if (matrix && box.width > 0 && box.height > 0) {
+        const anchor = new DOMPoint(point.clientX, point.clientY).matrixTransform(matrix.inverse());
+        anchorX = (anchor.x - box.x) / box.width;
+        anchorY = (anchor.y - box.y) / box.height;
+      }
+    }
     setView((previous) => {
       const [x = 0, y = 0, width = dimensions.width, height = dimensions.height] =
         (previous ?? defaultView).split(" ").map(Number);
-      const nextWidth = width * factor;
-      const nextHeight = height * factor;
-      if (nextWidth < dimensions.width / 6 || nextWidth > dimensions.width * 12) {
-        return previous;
-      }
-      return [x + (width - nextWidth) / 2, y + (height - nextHeight) / 2, nextWidth, nextHeight].join(" ");
+      const nextWidth = Math.min(dimensions.width * 12, Math.max(dimensions.width / 6, width * factor));
+      if (nextWidth === width) return previous;
+      const nextHeight = height * (nextWidth / width);
+      return [x + (width - nextWidth) * anchorX, y + (height - nextHeight) * anchorY, nextWidth, nextHeight].join(" ");
     });
-  }
+  }, [defaultView, dimensions]);
+
+  const hasGraph = simNodes.length > 0;
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || !hasGraph) return;
+    const doc = svg.ownerDocument;
+    let pointer: ClientPoint | undefined;
+    let gesture: { scale: number; anchor: ClientPoint | undefined } | undefined;
+    const trackPointer = ({ clientX, clientY }: PointerEvent) => { pointer = { clientX, clientY }; };
+    const clearPointer = () => { pointer = undefined; };
+
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      const { deltaMode, deltaY } = event;
+      if (deltaY === 0) return;
+      event.preventDefault();
+      if (gesture) return;
+      const step = deltaMode === WheelEvent.DOM_DELTA_LINE ? 0.5
+        : deltaMode === WheelEvent.DOM_DELTA_PAGE ? 10 : 0.02;
+      zoom(2 ** (deltaY * step), event);
+    };
+
+    // WebKit can send gesture events to the document. Claim a gesture only
+    // when it begins over the SVG, and keep using its initial anchor.
+    const startGesture = (event: Event) => {
+      gesture = undefined;
+      const target = event.target;
+      const onSvg = target instanceof Node && svg.contains(target);
+      const documentTarget = target === doc || target === doc.body || target === doc.documentElement;
+      if (!onSvg && !(documentTarget && pointer &&
+        svg.contains(doc.elementFromPoint(pointer.clientX, pointer.clientY)))) return;
+      event.preventDefault();
+      gesture = { scale: 1, anchor: pointer };
+    };
+    const changeGesture = (event: Event) => {
+      if (!gesture) return;
+      event.preventDefault();
+      const { scale } = event as Event & { scale: number };
+      if (!Number.isFinite(scale) || scale <= 0) return;
+      zoom(gesture.scale / scale, gesture.anchor);
+      gesture.scale = scale;
+    };
+    const endGesture = (event: Event) => {
+      if (gesture) event.preventDefault();
+      gesture = undefined;
+    };
+
+    svg.addEventListener("pointerenter", trackPointer);
+    svg.addEventListener("pointermove", trackPointer);
+    svg.addEventListener("pointerleave", clearPointer);
+    svg.addEventListener("wheel", wheel, { passive: false });
+    doc.addEventListener("gesturestart", startGesture, { passive: false });
+    doc.addEventListener("gesturechange", changeGesture, { passive: false });
+    doc.addEventListener("gestureend", endGesture, { passive: false });
+    return () => {
+      svg.removeEventListener("pointerenter", trackPointer);
+      svg.removeEventListener("pointermove", trackPointer);
+      svg.removeEventListener("pointerleave", clearPointer);
+      svg.removeEventListener("wheel", wheel);
+      doc.removeEventListener("gesturestart", startGesture);
+      doc.removeEventListener("gesturechange", changeGesture);
+      doc.removeEventListener("gestureend", endGesture);
+    };
+  }, [hasGraph, zoom]);
 
   const highlightedNodeId = hoveredNodeId ?? selectedNodeId;
 

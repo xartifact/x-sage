@@ -525,8 +525,8 @@ function Workspace({
                   </span>
                 ))}
               </div>
-              <span className="sage-graph-help" title="点击节点查看详情。拖动节点调整位置。">
-                <CircleHelp aria-hidden="true" />拖动节点调整位置
+              <span className="sage-graph-help" title="点击节点查看详情，拖动节点调整位置，在画布上捏合缩放。">
+                <CircleHelp aria-hidden="true" />拖动节点 · 捏合缩放
               </span>
             </footer>
           </section>
