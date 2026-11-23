@@ -116,7 +116,9 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 mkdir "$work/source" "$work/projection"
-git --git-dir="$repo" archive "$commit" | tar -xf - -C "$work/source"
+# The private parent protects the checkout. Keep Git's file modes inside it
+# because Docker copies them into the image used by a non-root runtime user.
+(umask 022; git --git-dir="$repo" archive "$commit" | tar -xf - -C "$work/source")
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/x-sage-release/cargo}"
 export CARGO_PROFILE_DEV_DEBUG="${CARGO_PROFILE_DEV_DEBUG:-0}"
 version=$(jq -er '.version | strings | select(length > 0)' "$work/source/package.json")

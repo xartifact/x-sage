@@ -26,6 +26,7 @@ test("the native gateway release validates the pinned Rust source and stages Bun
     'smoke "$public" "$short" main "$version"',
   ].map((entry) => script.indexOf(entry));
   expect(ordered.every((index, position) => index > (ordered[position - 1] ?? -1))).toBe(true);
+  expect(script).toContain('(umask 022; git --git-dir="$repo" archive');
   expect(script).toContain('x-sage-native-production up --pull never --no-build --wait --wait-timeout 75 bun');
   expect(script).toContain('cp -p "$slot/bun.env.previous" "$rollback"');
   expect(script).not.toContain("systemctl");
