@@ -1,4 +1,21 @@
 const base = import.meta.env?.VITE_API_BASE ?? "";
+
+export interface BuildIdentity {
+  version: string;
+  commitHash: string;
+}
+
+export async function fetchBuildIdentity(signal: AbortSignal): Promise<BuildIdentity | null> {
+  const url = new URL(`${base}/api/health`, window.location.origin);
+  const response = await fetch(url, { signal, cache: "no-store" });
+  // The health route also reports the running build while the database is unavailable.
+  if (!response.ok && response.status !== 503) return null;
+  const value: Partial<BuildIdentity> | null = await response.json();
+  return value && typeof value.version === "string" && typeof value.commitHash === "string"
+    ? { version: value.version, commitHash: value.commitHash }
+    : null;
+}
+
 export class ApiError extends Error {
   constructor(message:string, readonly status:number, readonly payload:unknown){super(message);this.name='ApiError';}
 }

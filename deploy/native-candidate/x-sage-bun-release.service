@@ -1,0 +1,11 @@
+[Unit]
+Description=Build and release x-sage Bun gateway from GitHub main
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:%h/.bun/bin:%h/.local/share/mise/installs/bun/latest/bin:%h/.local/share/mise/installs/node/lts/bin:%h/.cargo/bin:/usr/bin
+EnvironmentFile=%h/.config/x-sage/release.env
+ExecStart=%h/.local/lib/x-sage-release/release-bun.sh
+TimeoutStartSec=30min
+TimeoutStopSec=3min

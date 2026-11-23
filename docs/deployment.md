@@ -1,7 +1,7 @@
 # 部署
 
-x-sage 是「文件即数据库」的单进程应用：容器内同时提供 API 与静态前端，不依赖数据库、
-缓存或任何外部服务。KB 数据烘焙在镜像里（`/app/kb`）。
+生产由 Bun 容器提供 REST 和静态前端，独立的 Rust sage-db 服务负责知识库存储。
+本地开发镜像包含 Markdown 示例库（`/app/kb`）。
 
 ## 本地
 
@@ -22,64 +22,58 @@ x-sage --server http://localhost:3001 activate decision
 ## 架构形态
 
 标准 C/S + B/S：服务端是唯一读得到知识库的组件，CLI 与浏览器都是它的 REST 客户端。
-生产环境一个进程同时提供 `/api/*` 与静态前端。
+生产的 Bun 网关提供 `/api/*` 与静态前端，通过私有回环地址访问 Rust 数据库。
 
 ## 生产（x99）
 
-CI 在 push 到 `main` / `master` 时构建镜像、推送到 ghcr，然后在 self-hosted runner 上部署。
+生产由 x99 上的 `x-sage-bun-release.timer` 跟踪 GitHub `main`。旧版 GitHub
+Actions 部署工作流保持停用。它使用的旧 Compose 路径已经退出生产。
 
-服务器上需要一次性准备部署目录（属主是 runner 用户 `github-actions`）：
+发布脚本以生产运维用户的身份运行。从 GitHub 获取 `main` 的精确提交，运行仓库的
+`scripts/ci.sh`，以短提交号构建 Linux 镜像，再从 `127.0.0.1:3301` 验证候选网关。
+候选验证使用独立的投影目录。发布前后核对当前 Rust 数据库的读写就绪状态及其源摘要。
+随后在现有生产 Compose 项目替换 Bun 服务，并核对公网首页、图谱与健康接口。
+发布验证失败时恢复上一版 Bun 镜像与配置。Rust 进程和数据库目录继续由原有运维流程管理。
+
+如果新提交的 `sage-db/` Git tree 改变，网关自动发布会停止在构建之前。
+按[原生运行环境操作说明](../deploy/native-candidate/OPERATIONS.md)验收新的 Rust 发行物，
+完成数据库版本验证后，再更新运维配置中的 `SAGE_RUST_TREE`。
+
+在 x99 上把 [发布脚本](../deploy/native-candidate/release-bun.sh) 安装到
+`~/.local/lib/x-sage-release/release-bun.sh`，并把配套的
+[`.service`](../deploy/native-candidate/x-sage-bun-release.service) 和
+[`.timer`](../deploy/native-candidate/x-sage-bun-release.timer) 放到 `~/.config/systemd/user/`。
+在权限为 `0600` 的 `~/.config/x-sage/release.env` 中设置实际生产 Compose 目录
+`SAGE_PROD_SLOT`、已验收的 `SAGE_RUST_TREE`（用对应提交的
+`git rev-parse <commit>:sage-db` 获取）和[固定的协议生成工具](design/protocol-codegen.md)
+`SAGE_DB_PROTOC`、`SAGE_DB_TS_PROTO_PLUGIN`。安装后执行：
 
 ```bash
-# 在 x99 上
-sudo mkdir -p /opt/xartifact/x-sage && sudo chown github-actions:github-actions /opt/xartifact/x-sage
-# 放置只含 compose 的项目文件（CI 只做 pull + up，不构建）
+systemctl --user daemon-reload
+systemctl --user enable --now x-sage-bun-release.timer
+systemctl --user start x-sage-bun-release.service
+journalctl --user -u x-sage-bun-release.service
 ```
-
-`/opt/xartifact/x-sage/docker-compose.yml` 必须与仓库版本一致，关键是 image 可插值：
-
-```yaml
-services:
-  x-sage:
-    image: ghcr.io/xartifact/x-sage:${IMAGE_TAG:-latest}
-    container_name: x-sage
-    restart: unless-stopped
-    environment:
-      NODE_ENV: production
-      PORT: 3000
-      HOST: 0.0.0.0
-      X_SAGE_KB: /app/kb/default
-    ports:
-      - '3001:3000'
-    healthcheck:
-      test: ['CMD-SHELL', 'bun -e "fetch(\"http://localhost:3000/api/health\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"']
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
-```
-
-硬编码标签会让 `docker pull alpha` 成功却仍启动旧镜像，且不报错。
 
 ### 端口
 
-x99 上 3000 / 3200 / 5005 / 8787 已被其他产品占用，x-sage 使用 **3001**。
+生产网关监听 `127.0.0.1:3001`，候选网关使用 `127.0.0.1:3301`，
+原生数据库服务仅监听 `127.0.0.1:3901`。
 
 ### 版本断言
 
-`/api/health` 返回 `version` / `commitHash` / `buildRef`：
+`/api/health` 返回 `version` / `commitHash` / `buildRef`。网页顶栏显示运行版本与七位提交号。
 
 ```json
 {"ok":true,"kb":"/app/kb/default","version":"0.1.0","commitHash":"abc1234","buildRef":"main"}
 ```
 
-部署流程会把它与本次推送的 `GITHUB_SHA::7` / `GITHUB_REF_NAME` 比对。200 只能证明容器活着，
-无法区分「新容器」与「旧容器还在跑」——这正是断言存在的原因。
+生产部署将其与当次构建的包版本、`main` 提交前七位和分支名比对。
 
 这三个值跨四跳传递，改任何一处的名字都会静默退化为 `dev`/`unknown`：
 
 ```
-workflow build-args → Dockerfile ARG (base 阶段) → Dockerfile ENV → process.env
+build-args → Dockerfile ARG (base 阶段) → Dockerfile ENV → process.env
 ```
 
 `scripts/ci-contract.test.ts` 断言了这条链路和 compose 不得覆盖它。
@@ -98,9 +92,10 @@ workflow build-args → Dockerfile ARG (base 阶段) → Dockerfile ENV → proc
 ## 故障排查
 
 ```bash
-docker compose logs --tail=50 x-sage
-docker inspect --format '{{.State.Health.Status}}' x-sage
-docker exec x-sage bun -e "fetch('http://localhost:3000/api/health').then(r=>r.json()).then(console.log)"
+journalctl --user -u x-sage-bun-release.service -n 50
+docker logs --tail=50 x-sage-native-production-bun-1
+docker inspect --format '{{.State.Health.Status}}' x-sage-native-production-bun-1
+curl -fsS http://127.0.0.1:3001/api/health
 ```
 
 | 现象 | 原因 |

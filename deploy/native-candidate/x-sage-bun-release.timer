@@ -1,0 +1,9 @@
+[Unit]
+Description=Check GitHub main for a new x-sage gateway release
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=3min
+
+[Install]
+WantedBy=timers.target

@@ -31,7 +31,7 @@ import ConceptGraph from "./ConceptGraph";
 import FilterControls from "./FilterControls";
 import DetailPanel from "./DetailPanel";
 import Workbench from "./Workbench";
-import { ApiError, api } from "./api";
+import { ApiError, api, fetchBuildIdentity, type BuildIdentity } from "./api";
 import {
   conceptName,
   EDGE_TYPES,
@@ -55,7 +55,19 @@ export default function App() {
   const [editing, setEditing] = useState(false),
     [attempt, setAttempt] = useState(0),
     [loading, setLoading] = useState(true);
+  const [build, setBuild] = useState<BuildIdentity | null>(null);
   const { palette, setPalette, appearance, setAppearance } = useTheme();
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchBuildIdentity(controller.signal)
+      .then((identity) => {
+        if (!controller.signal.aborted) setBuild(identity);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setBuild(null);
+      });
+    return () => controller.abort();
+  }, [attempt]);
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -132,6 +144,12 @@ export default function App() {
           </Button>
         </div>
         <div className="sage-preferences">
+          {build && (
+            <div role="group" aria-label="运行版本" className="inline-flex items-center gap-1.5 whitespace-nowrap px-2 text-xs text-muted-foreground">
+              <span>版本 {build.version}</span>
+              <code title={build.commitHash}>{build.commitHash === "unknown" ? "未标记" : build.commitHash.slice(0, 7)}</code>
+            </div>
+          )}
           {readToken && !authRequired && (
             <Button
               variant="ghost"

@@ -16,6 +16,21 @@ async function read(relative: string): Promise<string> {
   return Bun.file(resolve(ROOT, relative)).text();
 }
 
+test("the native gateway release validates the pinned Rust source and stages Bun before promotion", async () => {
+  const script = await read("deploy/native-candidate/release-bun.sh");
+  const ordered = [
+    'rev-parse "$commit:sage-db"',
+    "./scripts/ci.sh",
+    'smoke "$preflight" "$short" main "$version"',
+    'mv -f "$next" "$settings"',
+    'smoke "$public" "$short" main "$version"',
+  ].map((entry) => script.indexOf(entry));
+  expect(ordered.every((index, position) => index > (ordered[position - 1] ?? -1))).toBe(true);
+  expect(script).toContain('x-sage-native-production up --pull never --no-build --wait --wait-timeout 75 bun');
+  expect(script).toContain('cp -p "$slot/bun.env.previous" "$rollback"');
+  expect(script).not.toContain("systemctl");
+});
+
 describe("workflow structure", () => {
   test("test job has no continue-on-error", async () => {
     // A gate that tolerates failure is not a gate.
