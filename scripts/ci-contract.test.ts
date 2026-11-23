@@ -20,10 +20,15 @@ test("the native gateway release validates the pinned Rust source and stages Bun
   const script = await read("deploy/native-candidate/release-bun.sh");
   const ordered = [
     'rev-parse "$commit:sage-db"',
+    'docker image tag "$old_image" x-sage-bun-release:active',
     "./scripts/ci.sh",
+    'docker build --tag "$candidate"',
     'smoke "$preflight" "$short" main "$version"',
+    'docker image tag "$old_image" x-sage-bun-release:rollback',
+    'cp -p "$settings" "$slot/bun.env.previous"',
     'mv -f "$next" "$settings"',
     'smoke "$public" "$short" main "$version"',
+    'docker image tag "$image" x-sage-bun-release:active',
   ].map((entry) => script.indexOf(entry));
   expect(ordered.every((index, position) => index > (ordered[position - 1] ?? -1))).toBe(true);
   expect(script).toContain('(umask 022; git --git-dir="$repo" archive');

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 umask 077
+trap 'printf "Bun release failed at line %s (exit %s)\n" "$LINENO" "$?" >&2' ERR
 
 : "${SAGE_PROD_SLOT:?set the active native production Compose directory}"
 : "${SAGE_RUST_TREE:?set the Git tree for the separately qualified sage-db release}"
@@ -87,6 +88,9 @@ database_ready
 gateway_ready "$production" "$old_commit" "$old_ref"
 test "$(docker image inspect --format '{{.Id}}' "$old_image")" = "$(docker inspect --format '{{.Image}}' "$container")"
 
+# Keep the running image addressable when the shared candidate tag moves.
+docker image tag "$old_image" x-sage-bun-release:active
+
 work=$(mktemp -d "$state/build.XXXXXXXX")
 staged=false
 promoting=false
@@ -167,5 +171,6 @@ compose x-sage-native-production up --pull never --no-build --wait --wait-timeou
 database_ready
 smoke "$production" "$short" main "$version"
 smoke "$public" "$short" main "$version"
+docker image tag "$image" x-sage-bun-release:active
 promoting=false
 printf 'Deployed and verified %s (%s)\n' "$commit" "$image"
