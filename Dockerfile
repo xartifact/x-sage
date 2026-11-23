@@ -69,10 +69,14 @@ RUN bun install --frozen-lockfile --ignore-scripts --production
 # ---- 生产运行 ----
 FROM base AS runner
 
-# ca-certificates 不是可选项：缺了它容器内任何 HTTPS 请求都会失败。
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+# The Bun base normally provides the trust bundle. Check it before using APT
+# so a release doesn't depend on a Debian mirror when the bundle is present.
+RUN if [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then \
+      apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 update \
+      && apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 install -y --no-install-recommends ca-certificates \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi \
+    && test -s /etc/ssl/certs/ca-certificates.crt
 
 ENV NODE_ENV=production
 

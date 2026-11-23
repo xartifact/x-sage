@@ -83,11 +83,12 @@ describe("Dockerfile", () => {
     expect(baseStage).toContain("ENV BUILD_REF=${BUILD_REF}");
   });
 
-  test("installs ca-certificates in the runner", async () => {
+  test("the runner verifies its TLS trust bundle", async () => {
     // Without it every HTTPS request inside the container fails.
     const dockerfile = await read("Dockerfile");
     const runnerStage = dockerfile.slice(dockerfile.indexOf("FROM base AS runner"));
-    expect(runnerStage).toContain("ca-certificates");
+    expect(runnerStage).toContain("install -y --no-install-recommends ca-certificates");
+    expect(runnerStage).toContain("test -s /etc/ssl/certs/ca-certificates.crt");
   });
 
   test("health check probes the container's own port", async () => {
