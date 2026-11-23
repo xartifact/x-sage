@@ -32,6 +32,7 @@ import FilterControls from "./FilterControls";
 import DetailPanel from "./DetailPanel";
 import Workbench from "./Workbench";
 import { ApiError, api, fetchBuildIdentity, type BuildIdentity } from "./api";
+import { browseGraph, countDomains, domainName } from "./graph-browser";
 import {
   conceptName,
   EDGE_TYPES,
@@ -292,8 +293,11 @@ function Workspace({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | undefined>();
   const [query, setQuery] = useState("");
-  const [pane, setPane] = useState<WorkspacePane>("graph");
+  const [pane, setPane] = useState<WorkspacePane>("directory");
   const [directoryMode, setDirectoryMode] = useState<"list" | "filters">("list");
+  const [domain, setDomain] = useState("");
+  const [graphMode, setGraphMode] = useState<"2d" | "3d">("2d");
+  const [neighborsOf, setNeighborsOf] = useState<string | null>(null);
   const [layers, setLayers] = useState<Set<Layer>>(() => new Set(LAYERS));
   const [edges, setEdges] = useState<Set<EdgeType>>(() => new Set(EDGE_TYPES));
   const input = useRef<HTMLInputElement>(null);
@@ -319,16 +323,12 @@ function Workspace({
     }
   }, [pane, data]);
 
-  const results = useMemo(() => {
-    const q = query.trim().toLocaleLowerCase();
-    return data?.nodes.filter((node) =>
-      !q ||
-      [conceptName(node), node.id, node.atom, ...node.triggers]
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(q),
-    ) ?? [];
-  }, [query, data?.nodes]);
+  const domains = useMemo(() => countDomains(data?.nodes ?? []), [data?.nodes]);
+  const graph = useMemo(() => browseGraph(data, {
+    domain, query, layers, relations: edges, neighborsOf,
+  }), [data, domain, query, layers, edges, neighborsOf]);
+  const domainOptions = domain && !domains.some(({ id }) => id === domain)
+    ? [...domains, { id: domain, count: 0 }] : domains;
 
   const selected = data?.nodes.find((node) => node.id === selectedId) ?? null;
   const filtered = layers.size !== LAYERS.length || edges.size !== EDGE_TYPES.length;
@@ -339,6 +339,7 @@ function Workspace({
   function select(id: string) {
     setSelectedId(id);
     setPane("detail");
+    if (neighborsOf && graph.matchIds.has(id)) setNeighborsOf(id);
     const node = data?.nodes.find((entry) => entry.id === id);
     if (node && !layers.has(node.layer)) {
       setLayers((previous) => new Set([...previous, node.layer]));
@@ -347,7 +348,16 @@ function Workspace({
 
   function closeDetail() {
     setSelectedId(null);
+    setNeighborsOf(null);
     setPane("graph");
+  }
+
+  function chooseDomain(id: string) {
+    setDomain(id);
+    setNeighborsOf(null);
+    if (id && selected && !selected.domain.includes(id)) setSelectedId(null);
+    setDirectoryMode("list");
+    setPane("directory");
   }
 
   function edit(id?: string) {
@@ -385,6 +395,22 @@ function Workspace({
           </Button>
         </div>
       </div>
+      {data && (
+        <div className="sage-domain-picker" role="group" aria-label="按领域浏览">
+          <span className="sage-domain-caption">领域</span>
+          {[{ id: "", count: data.nodes.length }, ...domainOptions].map(({ id, count }) => (
+            <Button
+              key={id}
+              variant="ghost"
+              size="sm"
+              aria-pressed={domain === id}
+              onClick={() => chooseDomain(id)}
+            >
+              {id ? domainName(id) : "全部"} <span className="sage-domain-count">{count}</span>
+            </Button>
+          ))}
+        </div>
+      )}
       {error && (
         <div role="alert" className="sage-graph-error">
           <AlertCircle className="size-4" />
@@ -429,7 +455,7 @@ function Workspace({
               <div className="sage-pane-heading">
                 <ListTree aria-hidden="true" />
                 <h3>概念目录</h3>
-                <span aria-label={`${results.length} 个概念`}>{results.length}</span>
+                <span aria-label={`${graph.nodes.length} 个概念`}>{graph.nodes.length}</span>
               </div>
               <div className="sage-search">
                 <Search aria-hidden="true" />
@@ -438,9 +464,10 @@ function Workspace({
                   value={query}
                   onChange={(event) => {
                     setQuery(event.target.value);
+                    setNeighborsOf(null);
                     setDirectoryMode("list");
                   }}
-                  placeholder="查找概念、摘要或触发词"
+                  placeholder={domain ? `搜索「${domainName(domain)}」` : "查找概念、摘要或触发词"}
                   aria-label="搜索概念"
                 />
                 {query ? (
@@ -451,6 +478,7 @@ function Workspace({
                     aria-label="清除搜索"
                     onClick={() => {
                       setQuery("");
+                      setNeighborsOf(null);
                       input.current?.focus();
                     }}
                   ><X /></Button>
@@ -461,12 +489,12 @@ function Workspace({
                   variant="ghost"
                   aria-current={directoryMode === "list" ? "page" : undefined}
                   onClick={() => setDirectoryMode("list")}
-                >全部概念</Button>
+                >概念列表</Button>
                 <Button
                   variant="ghost"
                   aria-current={directoryMode === "filters" ? "page" : undefined}
                   onClick={() => setDirectoryMode("filters")}
-                ><SlidersHorizontal />筛选{filtered && " · 已应用"}</Button>
+                ><SlidersHorizontal />高级筛选{filtered && " · 已应用"}</Button>
               </nav>
             </header>
             <div className="sage-directory-scroll">
@@ -474,7 +502,7 @@ function Workspace({
                 <FilterControls
                   visibleLayers={layers}
                   visibleEdgeTypes={edges}
-                  layerCounts={data.meta?.layerCounts}
+                  layerCounts={graph.layerCounts}
                   onToggleLayer={(layer) => setLayers((previous) => {
                     const next = new Set(previous);
                     if (!next.delete(layer)) next.add(layer);
@@ -486,14 +514,17 @@ function Workspace({
                     return next;
                   })}
                 />
-              ) : results.length === 0 ? (
+              ) : graph.nodes.length === 0 ? (
                 <p className="sage-directory-empty">
-                  {query ? "没有匹配的概念。试试其他关键词。" : "还没有概念。可在维护知识中新增。"}
+                  {data.nodes.length ? "当前条件下没有匹配的概念。" : "还没有概念。可在维护知识中新增。"}
                 </p>
               ) : (
                 <ul className="sage-concept-list">
-                  {results.map((node) => (
+                  {graph.nodes.map((node, index) => (
                     <li key={node.id}>
+                      {index === graph.matches.length && (
+                        <h4 className="sage-neighbor-heading">一跳关联 · {graph.neighbors.length}</h4>
+                      )}
                       <button
                         onClick={() => select(node.id)}
                         className="sage-concept"
@@ -520,16 +551,23 @@ function Workspace({
                 <h3>知识图谱</h3>
               </div>
               <div className="sage-graph-counts">
-                <span><strong>{data.nodes.length}</strong> 个概念</span>
-                <span><strong>{data.meta?.assertedEdgeCount ?? data.edges.filter((edge) => !edge.mirrored).length}</strong> 条关系</span>
+                <span><strong>{graph.nodes.length}</strong> 个概念</span>
+                <span><strong>{graph.edges.length}</strong> 条关系</span>
+              </div>
+              <div className="sage-graph-mode" role="group" aria-label="图谱视图">
+                {(["2d", "3d"] as const).map((mode) => (
+                  <Button key={mode} variant="ghost" size="sm" aria-pressed={graphMode === mode} onClick={() => setGraphMode(mode)}>
+                    {mode.toUpperCase()}
+                  </Button>
+                ))}
               </div>
             </header>
             <div className="sage-canvas">
               <ConceptGraph
-                nodes={data.nodes}
-                edges={data.edges}
-                visibleLayers={layers}
-                visibleEdgeTypes={edges}
+                key={graphMode}
+                mode={graphMode}
+                nodes={graph.nodes}
+                edges={graph.edges}
                 onNodeClick={(node) => node ? select(node.id) : closeDetail()}
                 selectedNodeId={selected?.id ?? null}
               />
@@ -543,9 +581,26 @@ function Workspace({
                   </span>
                 ))}
               </div>
-              <span className="sage-graph-help" title="点击节点查看详情，拖动节点调整位置，在画布上捏合缩放。">
-                <CircleHelp aria-hidden="true" />拖动节点 · 捏合缩放
-              </span>
+              <div className="sage-graph-actions">
+                {neighborsOf && graph.neighbors.length === 0 && (
+                  <span className="text-xs text-muted-foreground" role="status">没有范围外的关联概念</span>
+                )}
+                {(neighborsOf || (selectedId && graph.matchIds.has(selectedId))) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-pressed={!!neighborsOf}
+                    title="显示所选概念在当前范围外的一跳关联"
+                    onClick={() => setNeighborsOf(neighborsOf ? null : selectedId)}
+                  >
+                    {neighborsOf ? "收起关联" : "展开一跳"}
+                  </Button>
+                )}
+                <span className="sage-graph-help" title="点击节点查看详情。在画布上捏合缩放。">
+                  <CircleHelp aria-hidden="true" />
+                  {graphMode === "3d" ? "拖动旋转 · 捏合缩放" : "拖动节点 · 捏合缩放"}
+                </span>
+              </div>
             </footer>
           </section>
 
@@ -577,6 +632,7 @@ function Workspace({
           kb={kb}
           readToken={readToken}
           ids={data.nodes.map((node) => node.id)}
+          domains={domains.map(({ id }) => id)}
           onChange={reload}
           onClose={() => setEditing(false)}
           {...(editId ? { initialConceptId: editId } : {})}

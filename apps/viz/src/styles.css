@@ -207,6 +207,29 @@
 .sage-graph-error { display: flex; align-items: center; gap: 8px; border: 1px solid var(--xa-border); border-radius: 8px; padding: 6px 12px; color: var(--xa-danger); background: var(--xa-danger-soft); }
 .sage-workspace-empty { display: flex; flex: 1; align-items: center; justify-content: center; min-height: 280px; gap: 8px; color: var(--xa-muted); }
 
+.sage-domain-picker {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px;
+  border: 1px solid var(--xa-border);
+  border-radius: 9px;
+  background: var(--xa-surface);
+}
+.sage-domain-caption { padding-inline: 9px 4px; white-space: nowrap; color: var(--xa-muted); font-size: 12px; }
+.sage-domain-picker button { flex: none; }
+.sage-domain-picker button[aria-pressed="true"], .sage-graph-mode button[aria-pressed="true"] {
+  background: var(--xa-brand-soft);
+  color: var(--xa-brand);
+}
+.sage-domain-count { color: var(--xa-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sage-neighbor-heading { margin: 7px 6px 3px; padding-top: 8px; border-top: 1px solid var(--xa-border); color: var(--xa-muted); font-size: 12px; }
+.sage-graph-mode, .sage-graph-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.graph-svg:focus-visible { outline: 2px solid var(--xa-brand); outline-offset: -2px; }
+.sage-layer-plane { fill: color-mix(in srgb, var(--xa-brand) 4%, transparent); stroke: var(--xa-border); vector-effect: non-scaling-stroke; }
+
 .sage-workbench {
   position: relative;
   display: grid;
@@ -378,6 +401,7 @@
   .sage-workspace { gap: 13px; padding: 18px 12px 20px; }
   .sage-page-heading { gap: 12px; align-items: center; }
   .sage-heading-actions { flex-wrap: wrap; }
+  .sage-domain-picker button, .sage-graph-mode button, .sage-graph-actions button { min-height: 44px; }
   .sage-heading-actions button, .sage-brand-group button, .sage-preferences button { min-height: 44px; }
   .sage-heading-actions button[aria-label="刷新图谱"], .sage-brand-group button[aria-label="刷新知识库列表"] { min-width: 44px; }
   .sage-sync { order: 3; flex-basis: 100%; }

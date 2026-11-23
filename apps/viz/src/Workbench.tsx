@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { api, ApiError } from "./api";
+import { domainName } from "./graph-browser";
 import { EDGE_TYPES, EDGE_LABELS } from "./types";
 import OperationResult from "./OperationResult";
 import {
@@ -63,6 +64,7 @@ import {
 interface Props {
   kb: string;
   ids: string[];
+  domains: string[];
   readToken: string;
   onChange: () => void;
   onClose: () => void;
@@ -190,6 +192,7 @@ function Choice({
 export default function Workbench({
   kb,
   ids,
+  domains,
   readToken,
   onChange,
   onClose,
@@ -221,6 +224,7 @@ export default function Workbench({
     priority: "medium",
     type: "depends-on",
   });
+  const selectedDomains = split(fields.domain ?? "");
   const [kind, setKind] = useState("body"),
     [body, setBody] = useState(""),
     [revision, setRevision] = useState("");
@@ -580,7 +584,7 @@ export default function Workbench({
                         atom: fields.atom ?? "",
                         body: fields.molecule ?? "",
                         layer: Number(fields.layer),
-                        domains: split(fields.domain ?? ""),
+                        domains: [...new Set(selectedDomains)],
                         triggers: split(fields.triggers ?? ""),
                         confidence: ["contested", "hypothetical", "confirmed"].indexOf(fields.confidence ?? ""),
                         source: ["personal", "domain", "synthesis"].indexOf(fields.source ?? ""),
@@ -645,10 +649,35 @@ export default function Workbench({
                       />
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2">
-                      {input("domain", "领域", {
-                        placeholder: "engineering, product",
-                        hint: "多个值用逗号分隔。",
-                      })}
+                      <div className="space-y-2">
+                        {input("domain", "领域", {
+                          placeholder: "engineering, product",
+                          hint: "可选择已有领域，或用逗号分隔多个领域 ID。",
+                        })}
+                        {domains.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5" role="group" aria-label="已有领域">
+                            {domains.map((domain) => {
+                              const selected = selectedDomains.includes(domain);
+                              return (
+                                <Button
+                                  key={domain}
+                                  type="button"
+                                  variant={selected ? "secondary" : "outline"}
+                                  size="sm"
+                                  disabled={busy}
+                                  aria-pressed={selected}
+                                  title={domain}
+                                  onClick={() => change("domain", (selected
+                                    ? selectedDomains.filter((id) => id !== domain)
+                                    : [...selectedDomains, domain]).join(", "))}
+                                >
+                                  {domainName(domain)}
+                                </Button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                       {input("triggers", "触发词", {
                         placeholder: "上下文, 按需激活",
                         hint: "用于发现与激活此概念。",

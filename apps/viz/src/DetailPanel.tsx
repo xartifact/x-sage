@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { conceptName, LAYER_LABELS, EDGE_LABELS } from "./types";
 import type { GraphNode, GraphEdge } from "./types";
+import { domainName } from "./graph-browser";
 
 interface DetailPanelProps {
   node: GraphNode | null;
@@ -84,9 +85,9 @@ export default function DetailPanel({
             领域与触发词
           </h3>
           <div className="flex flex-wrap gap-1.5">
-            {node.domain.map((d) => (
-              <Badge key={`domain-${d}`} variant="secondary">
-                {d}
+            {[...new Set(node.domain)].map((d) => (
+              <Badge key={`domain-${d}`} variant="secondary" title={d}>
+                {domainName(d)}
               </Badge>
             ))}
             {node.triggers.map((t) => (

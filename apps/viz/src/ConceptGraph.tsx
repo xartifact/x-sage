@@ -1,9 +1,10 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Maximize2, Minus, Plus, RotateCcw, Network } from "lucide-react";
+import { Focus, Maximize2, Minus, Plus, RotateCcw, Network } from "lucide-react";
 import * as d3 from "d3";
 import { conceptName, LAYER_COLORS, NODE_RADIUS, EDGE_COLORS } from "./types";
-import type { GraphNode, GraphEdge, Layer, EdgeType } from "./types";
+import type { GraphNode, GraphEdge, EdgeType } from "./types";
+import { defaultGraphCamera, graphProjection, rotateGraph, type GraphCamera } from "./graph-camera";
 
 interface SimulationNode extends GraphNode, d3.SimulationNodeDatum {
   id: string;
@@ -18,10 +19,9 @@ interface SimulationEdge extends d3.SimulationLinkDatum<SimulationNode> {
 type ClientPoint = Pick<MouseEvent, "clientX" | "clientY">;
 
 interface ConceptGraphProps {
+  mode: "2d" | "3d";
   nodes: GraphNode[];
   edges: GraphEdge[];
-  visibleLayers: Set<Layer>;
-  visibleEdgeTypes: Set<EdgeType>;
   onNodeClick: (node: GraphNode | null) => void;
   selectedNodeId: string | null;
 }
@@ -32,26 +32,16 @@ function getNodeId(d: string | number | SimulationNode): string {
   return d.id;
 }
 
-function getNodeCoords(d: string | number | SimulationNode): {
-  x: number;
-  y: number;
-} {
-  if (typeof d === "string" || typeof d === "number") return { x: 0, y: 0 };
-  return { x: d.x ?? 0, y: d.y ?? 0 };
-}
-
-function fittedView(nodes: SimulationNode[]): string {
-  const xs = nodes.map((node) => node.x ?? 0),
-    ys = nodes.map((node) => node.y ?? 0);
+function fittedView(points: { x: number; y: number }[]): string {
   const padding = 96;
-  const left = Math.min(...xs) - padding,
-    top = Math.min(...ys) - padding;
-  return [
-    left,
-    top,
-    Math.max(...xs) - left + padding,
-    Math.max(...ys) - top + padding,
-  ].join(" ");
+  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+  for (const point of points) {
+    left = Math.min(left, point.x);
+    top = Math.min(top, point.y);
+    right = Math.max(right, point.x);
+    bottom = Math.max(bottom, point.y);
+  }
+  return [left - padding, top - padding, right - left + 2 * padding, bottom - top + 2 * padding].join(" ");
 }
 
 function graphLabel(node: GraphNode): string {
@@ -60,10 +50,9 @@ function graphLabel(node: GraphNode): string {
 }
 
 export default function ConceptGraph({
+  mode,
   nodes,
   edges,
-  visibleLayers,
-  visibleEdgeTypes,
   onNodeClick,
   selectedNodeId,
 }: ConceptGraphProps) {
@@ -71,6 +60,9 @@ export default function ConceptGraph({
   const positions = useRef(new Map<string, { x: number; y: number }>());
   const viewport = useRef("");
   const dragging = useRef<string | null>(null);
+  const [camera, setCamera] = useState(defaultGraphCamera);
+  const orbit = useRef<{ id: number; x: number; y: number; initial: GraphCamera; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
   const [view, setView] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<
@@ -99,29 +91,12 @@ export default function ConceptGraph({
     return () => observer.disconnect();
   }, []);
 
-  // Filter visible nodes and edges
-  const filteredNodes = useMemo(
-    () => nodes.filter((n) => visibleLayers.has(n.layer)),
-    [nodes, visibleLayers],
-  );
-
-  const filteredEdges = useMemo(
-    () =>
-      edges.filter(
-        (e) =>
-          visibleEdgeTypes.has(e.type) &&
-          filteredNodes.some((n) => n.id === e.from) &&
-          filteredNodes.some((n) => n.id === e.target),
-      ),
-    [edges, visibleEdgeTypes, filteredNodes],
-  );
-
   // Initialize / update simulation
   useEffect(() => {
     const liveIds = new Set(nodes.map((node) => node.id));
     for (const id of positions.current.keys())
       if (!liveIds.has(id)) positions.current.delete(id);
-    if (filteredNodes.length === 0) {
+    if (nodes.length === 0) {
       setSimNodes([]);
       setSimEdges([]);
       setHoveredNodeId(null);
@@ -132,7 +107,7 @@ export default function ConceptGraph({
     const width = dimensions.width;
     const height = dimensions.height;
 
-    const simNodes: SimulationNode[] = filteredNodes.map((n) => ({
+    const simNodes: SimulationNode[] = nodes.map((n) => ({
       ...n,
       x:
         positions.current.get(n.id)?.x ??
@@ -142,7 +117,7 @@ export default function ConceptGraph({
         height / 2 + (Math.random() - 0.5) * 100,
     }));
 
-    const simEdges: SimulationEdge[] = filteredEdges.map((e) => ({
+    const simEdges: SimulationEdge[] = edges.map((e) => ({
       ...e,
       source: e.from,
       target: e.target,
@@ -186,7 +161,15 @@ export default function ConceptGraph({
     if (viewport.current !== viewportKey) {
       // A narrow canvas starts with the entire graph visible. Resize/orientation
       // changes recalculate the fit; manual reset stays until the next resize.
-      setView(width <= 640 ? fittedView(simNodes) : null);
+      if (mode === "3d") {
+        const project = graphProjection(defaultGraphCamera, dimensions);
+        setCamera(defaultGraphCamera);
+        setView(fittedView(simNodes.map((node) => project(node.x ?? 0, node.y ?? 0, node.layer))));
+      } else {
+        setView(width <= 640 ? fittedView(simNodes.map((node) =>
+          ({ x: node.x ?? 0, y: node.y ?? 0 }),
+        )) : null);
+      }
       viewport.current = viewportKey;
     }
     simulation.on("tick", publish);
@@ -196,7 +179,7 @@ export default function ConceptGraph({
     return () => {
       simulation.stop();
     };
-  }, [filteredNodes, filteredEdges, dimensions]);
+  }, [nodes, edges, dimensions, mode]);
 
   const startDrag = (
     event: React.PointerEvent<SVGGElement>,
@@ -227,10 +210,51 @@ export default function ConceptGraph({
     node.fy = null;
     simulationRef.current?.alphaTarget(0);
   };
-  const fit = () => {
-    if (!simNodes.length) return;
-    setView(fittedView(simNodes));
+  const project = graphProjection(camera, dimensions);
+  const plottedNodes = simNodes.map((node) => {
+    const x = node.x ?? 0, y = node.y ?? 0;
+    return { node, ...(mode === "3d" ? project(x, y, node.layer) : { x, y, scale: 1, depth: 0 }) };
+  });
+  if (mode === "3d") plottedNodes.sort((a, b) => b.depth - a.depth);
+  const plottedById = new Map(plottedNodes.map((point) => [point.node.id, point]));
+  const selectedPoint = selectedNodeId ? plottedById.get(selectedNodeId) : undefined;
+  const showAllLabels = mode === "3d" ? nodes.length <= 24 : dimensions.width > 460;
+
+  const startOrbit = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (mode !== "3d" || !event.isPrimary || event.button !== 0) return;
+    suppressClick.current = false;
+    orbit.current = { id: event.pointerId, x: event.clientX, y: event.clientY, initial: camera, moved: false };
   };
+  const moveOrbit = (event: React.PointerEvent<SVGSVGElement>) => {
+    const active = orbit.current;
+    if (!active || active.id !== event.pointerId) return;
+    const dx = event.clientX - active.x, dy = event.clientY - active.y;
+    if (!active.moved) {
+      if (Math.hypot(dx, dy) < 4) return;
+      active.moved = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    setCamera(rotateGraph(active.initial, dx, dy));
+  };
+  const endOrbit = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (orbit.current?.id !== event.pointerId) return;
+    suppressClick.current = orbit.current.moved;
+    orbit.current = null;
+  };
+
+  function resetView() {
+    setCamera(defaultGraphCamera);
+    const resetProjection = graphProjection(defaultGraphCamera, dimensions);
+    setView(mode === "3d" && simNodes.length ? fittedView(simNodes.map((node) =>
+      resetProjection(node.x ?? 0, node.y ?? 0, node.layer),
+    )) : null);
+  }
+
+  function focusSelection() {
+    if (!selectedPoint) return;
+    const width = dimensions.width * 0.6, height = dimensions.height * 0.6;
+    setView([selectedPoint.x - width / 2, selectedPoint.y - height / 2, width, height].join(" "));
+  }
 
   const defaultView = `0 0 ${dimensions.width} ${dimensions.height}`;
   const zoom = useCallback((factor: number, point?: ClientPoint) => {
@@ -387,36 +411,72 @@ export default function ConceptGraph({
         <Button
           variant="ghost"
           size="icon"
-          onClick={fit}
+          onClick={() => setView(fittedView(plottedNodes))}
           disabled={simNodes.length === 0}
           aria-label="适应全部节点"
           title="适应全部节点"
         >
           <Maximize2 className="size-4" />
         </Button>
+        {mode === "3d" && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={focusSelection}
+            disabled={!selectedPoint}
+            aria-label="定位所选概念"
+            title="定位所选概念"
+          >
+            <Focus className="size-4" />
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setView(null)}
+          onClick={resetView}
           aria-label="重置视图"
           title="重置视图"
         >
           <RotateCcw className="size-4" />
         </Button>
       </div>
-      {filteredNodes.length === 0 && (
+      {nodes.length === 0 && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center text-muted-foreground">
           <Network className="size-8" />
           <p className="text-sm">当前视图没有概念</p>
-          <p className="text-xs">调整筛选条件，或创建第一个概念。</p>
+          <p className="text-xs">调整领域、关键词或筛选条件。</p>
         </div>
       )}
       <svg
         ref={svgRef}
         className="graph-svg h-full w-full touch-none"
-        aria-label="知识概念关系图"
+        aria-label={mode === "3d" ? "三维知识概念关系图" : "知识概念关系图"}
+        tabIndex={mode === "3d" ? 0 : undefined}
         viewBox={view ?? defaultView}
+        onPointerDown={startOrbit}
+        onPointerMove={moveOrbit}
+        onPointerUp={endOrbit}
+        onPointerCancel={endOrbit}
+        onLostPointerCapture={endOrbit}
+        onPointerLeave={() => {
+          if (orbit.current && !orbit.current.moved) orbit.current = null;
+        }}
+        onClickCapture={(event) => {
+          if (event.detail > 0 && suppressClick.current) {
+            suppressClick.current = false;
+            event.stopPropagation();
+          }
+        }}
         onClick={handleSvgClick}
+        onKeyDown={(event) => {
+          if (mode !== "3d") return;
+          const dx = event.key === "ArrowLeft" ? -20 : event.key === "ArrowRight" ? 20 : 0;
+          const dy = event.key === "ArrowUp" ? -20 : event.key === "ArrowDown" ? 20 : 0;
+          if (dx || dy) {
+            event.preventDefault();
+            setCamera((previous) => rotateGraph(previous, dx, dy));
+          }
+        }}
       >
         <defs>
           {/* Arrow markers for each edge type */}
@@ -440,11 +500,25 @@ export default function ConceptGraph({
           ))}
         </defs>
 
+        {mode === "3d" && (
+          <g aria-hidden="true" pointerEvents="none">
+            {[...new Set(nodes.map((node) => node.layer))].map((layer) => {
+              const corners = [[0.2, 0.23], [0.8, 0.23], [0.8, 0.77], [0.2, 0.77]] as const;
+              const points = corners.map(([x, y]) => {
+                const point = project(x * dimensions.width, y * dimensions.height, layer);
+                return `${point.x},${point.y}`;
+              }).join(" ");
+              return <polygon key={layer} className="sage-layer-plane" points={points} />;
+            })}
+          </g>
+        )}
+
         {/* Edges */}
         <g>
           {simEdges.map((edge, idx) => {
-            const srcCoords = getNodeCoords(edge.source);
-            const tgtCoords = getNodeCoords(edge.target);
+            const srcCoords = plottedById.get(getNodeId(edge.source));
+            const tgtCoords = plottedById.get(getNodeId(edge.target));
+            if (!srcCoords || !tgtCoords) return null;
 
             const isHighlighted = edgeHighlighted.has(idx);
             const isDimmed = highlightedNodeId && !isHighlighted;
@@ -452,7 +526,7 @@ export default function ConceptGraph({
             const strokeWidth = isHighlighted ? 2.25 : 1.25;
             const dx = tgtCoords.x - srcCoords.x;
             const dy = tgtCoords.y - srcCoords.y;
-            const targetRadius = typeof edge.target === "object" ? NODE_RADIUS[edge.target.layer] * 0.54 : 0;
+            const targetRadius = NODE_RADIUS[tgtCoords.node.layer] * 0.54 * tgtCoords.scale;
             const length = Math.hypot(dx, dy);
             const trim = length > targetRadius ? targetRadius / length : 0;
 
@@ -482,19 +556,19 @@ export default function ConceptGraph({
 
         {/* Nodes */}
         <g>
-          {simNodes.map((node) => {
+          {plottedNodes.map(({ node, x, y, scale }) => {
             const isHovered = hoveredNodeId === node.id;
             const isNeighbor = neighborSet.has(node.id);
             const isSelected = selectedNodeId === node.id;
             const isDimmed = highlightedNodeId && !isNeighbor;
             const opacity = isDimmed ? 0.3 : 1.0;
-            const showLabel = isHovered || isSelected || (!isDimmed && (dimensions.width > 460 || node.layer < 2));
-            const radius = NODE_RADIUS[node.layer] * 0.54;
+            const showLabel = isHovered || isSelected || (!isDimmed && (showAllLabels || node.layer < 2));
+            const radius = NODE_RADIUS[node.layer] * 0.54 * scale;
 
             return (
               <g
                 key={node.id}
-                transform={`translate(${node.x ?? 0}, ${node.y ?? 0})`}
+                transform={`translate(${x}, ${y})`}
                 opacity={opacity}
                 style={{ transition: "opacity 150ms ease" }}
                 onMouseEnter={(e) => handleNodeHover(node, e)}
@@ -512,10 +586,10 @@ export default function ConceptGraph({
                 }}
                 onFocus={() => setHoveredNodeId(node.id)}
                 onBlur={handleNodeLeave}
-                onPointerDown={(e) => startDrag(e, node)}
-                onPointerMove={(e) => moveDrag(e, node)}
-                onPointerUp={(e) => endDrag(e, node)}
-                onPointerCancel={(e) => endDrag(e, node)}
+                onPointerDown={mode === "2d" ? (e) => startDrag(e, node) : undefined}
+                onPointerMove={mode === "2d" ? (e) => moveDrag(e, node) : undefined}
+                onPointerUp={mode === "2d" ? (e) => endDrag(e, node) : undefined}
+                onPointerCancel={mode === "2d" ? (e) => endDrag(e, node) : undefined}
                 onClick={(e) => {
                   e.stopPropagation();
                   onNodeClick(node);
