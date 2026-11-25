@@ -32,6 +32,7 @@ use sage_db_kernel::relations::{
     DECISION_APPROVE, DECISION_REJECT, RelationAssert, RelationAssertError,
     RelationAssertInputError, RelationAssertPayloadError, decode_review, decode_submit,
     encode_review, encode_submit, review_relation_assert, submit_relation_assert,
+    submit_relation_replace,
 };
 use sage_db_store::fold::FoldedRecord;
 use sage_db_store::fs::CreateDir;
@@ -2995,4 +2996,232 @@ fn two_reviewers_cas_on_the_same_proposal_and_an_unrelated_pending_is_untouched(
     )
     .expect("the unrelated pending proposal still approves");
     assert_eq!(read_assertion(&store, 2).from, term_key(2));
+}
+
+fn original_dependency(store: &mut Store<ObservingFs>, id: u128, submitted: &str, reviewed: &str) {
+    let set = endpoint_set(1, 2, store);
+    submit(
+        store,
+        &submitter(),
+        submitted,
+        request(1, 2, RelationId::DependsOn, ""),
+        &set,
+        &mut ledger(),
+    )
+    .unwrap();
+    review(
+        store,
+        proposal_key(id),
+        RecordRevision::FIRST,
+        DECISION_APPROVE,
+        "approve original",
+        reviewed,
+        &mut ledger(),
+    )
+    .unwrap();
+}
+
+fn reversed_submission(
+    store: &mut Store<ObservingFs>,
+    request_id: &str,
+    old: RevPair,
+) -> Result<HandleOutcome, RelationAssertError> {
+    let mut revisions = endpoint_set(2, 1, store);
+    revisions.push(old);
+    submit_relation_replace(
+        store,
+        &submitter(),
+        meta(request_id),
+        request(2, 1, RelationId::DependsOn, ""),
+        &revisions,
+        &Limits::V1,
+        &mut ledger(),
+    )
+}
+
+fn original_baseline() -> RevPair {
+    RevPair {
+        key: assertion_key(1),
+        revision: RecordRevision::FIRST,
+    }
+}
+
+fn proposal_status(store: &Store<ObservingFs>, id: u128) -> ProposalStatus {
+    let mut read = ledger();
+    let sage_db_store::view::RecordLookup::Found {
+        record: FoldedRecord::Proposal(row),
+        ..
+    } = store.record(proposal_key(id), &mut read).unwrap()
+    else {
+        panic!("proposal {id} disappeared");
+    };
+    row.status
+}
+
+#[test]
+fn relation_replacement_rotates_the_active_support_and_preserves_retry() {
+    let (_inner, fs, mut store) = seed_world();
+    original_dependency(&mut store, 1, "seed", "seed-ok");
+    reversed_submission(&mut store, "replace", original_baseline()).unwrap();
+    reversed_submission(&mut store, "competing", original_baseline()).unwrap();
+
+    let before = store.head().unwrap();
+    let original = read_assertion(&store, 1);
+    assert!(!original.retracted);
+    let approval = review(
+        &mut store,
+        proposal_key(2),
+        RecordRevision::FIRST,
+        DECISION_APPROVE,
+        "reverse direction",
+        "replace-ok",
+        &mut ledger(),
+    )
+    .unwrap();
+    let HandleOutcome::Committed { version, .. } = approval else {
+        panic!("{approval:?}");
+    };
+    assert_eq!(version, before + 1);
+    drop(store);
+    let sage_db_store::open::Opened::Ready(mut store) =
+        open_existing(fs, Path::new(ROOT), Some(kb()), &Limits::V1, &mut ledger()).unwrap()
+    else {
+        panic!("replacement must remain durable on reopen");
+    };
+    let old = read_assertion(&store, 1);
+    assert!(old.retracted);
+    assert_eq!(old.revision.get(), 2);
+    assert_eq!((old.from, old.target), (original.from, original.target));
+    assert_eq!(old.common.created_at, original.common.created_at);
+    assert_eq!(old.common.recorded_by.as_deref(), Some(REVIEWER));
+    let new = read_assertion(&store, 2);
+    assert!(!new.retracted);
+    assert_eq!(new.revision, RecordRevision::FIRST);
+    assert_eq!(
+        (new.from, new.target, new.relation),
+        (term_key(2), term_key(1), RelationId::DependsOn)
+    );
+    assert_eq!(proposal_status(&store, 2), ProposalStatus::Approved);
+    assert!(matches!(
+        review(
+            &mut store, proposal_key(2), RecordRevision::FIRST, DECISION_APPROVE,
+            "reverse direction", "replace-ok", &mut ledger(),
+        ).unwrap(),
+        HandleOutcome::AlreadyCommitted { version: retried, .. } if retried == version
+    ));
+    assert_eq!(store.head(), Some(version));
+    assert!(matches!(
+        reversed_submission(&mut store, "replace", original_baseline()).unwrap(),
+        HandleOutcome::AlreadyCommitted { .. }
+    ));
+    assert_eq!(store.head(), Some(version));
+    assert!(matches!(
+        reversed_submission(&mut store, "replace-new", original_baseline()),
+        Err(RelationAssertError::Input(RelationAssertInputError::StaleAssertion(old)))
+            if old == original_baseline()
+    ));
+    review(
+        &mut store,
+        proposal_key(3),
+        RecordRevision::FIRST,
+        DECISION_APPROVE,
+        "competing replacement",
+        "competing-ok",
+        &mut ledger(),
+    )
+    .unwrap();
+    assert_eq!(proposal_status(&store, 3), ProposalStatus::Conflicted);
+    assert!(matches!(
+        store.record(assertion_key(3), &mut ledger()).unwrap(),
+        sage_db_store::view::RecordLookup::Absent { .. }
+    ));
+}
+
+#[test]
+fn replacement_cannot_hide_an_independent_support_or_retract_on_rejection() {
+    let (_inner, _fs, mut store) = seed_world();
+    original_dependency(&mut store, 1, "seed", "seed-ok");
+    original_dependency(&mut store, 2, "seed-second", "seed-second-ok");
+    reversed_submission(&mut store, "replace", original_baseline()).unwrap();
+    let before = store.head();
+    assert!(matches!(
+        review(
+            &mut store,
+            proposal_key(3),
+            RecordRevision::FIRST,
+            DECISION_APPROVE,
+            "reverse",
+            "replace-invalid",
+            &mut ledger(),
+        ),
+        Err(RelationAssertError::Input(
+            RelationAssertInputError::InvalidCandidate { .. }
+        ))
+    ));
+    assert_eq!(store.head(), before);
+    assert_eq!(proposal_status(&store, 3), ProposalStatus::Pending);
+    review(
+        &mut store,
+        proposal_key(3),
+        RecordRevision::FIRST,
+        DECISION_REJECT,
+        "keep the independent assertions",
+        "replace-no",
+        &mut ledger(),
+    )
+    .unwrap();
+    assert_eq!(proposal_status(&store, 3), ProposalStatus::Rejected);
+    assert!(!read_assertion(&store, 1).retracted);
+    assert!(!read_assertion(&store, 2).retracted);
+    assert!(matches!(
+        store.record(assertion_key(3), &mut ledger()).unwrap(),
+        sage_db_store::view::RecordLookup::Absent { .. }
+    ));
+}
+
+#[test]
+fn an_unknown_replacement_recovers_without_publishing_half_of_the_change() {
+    let (inner, fs, mut store) = seed_world();
+    original_dependency(&mut store, 1, "seed", "seed-ok");
+    reversed_submission(&mut store, "replace", original_baseline()).unwrap();
+    *inner.faults_handle().borrow_mut() = FaultSchedule::none().at(
+        FaultPoint::ReplaceCurrent,
+        Injection::FailUnknownAfterEffect,
+        1,
+    );
+    assert!(matches!(
+        review(
+            &mut store,
+            proposal_key(2),
+            RecordRevision::FIRST,
+            DECISION_APPROVE,
+            "switch direction",
+            "unknown-replace",
+            &mut ledger(),
+        )
+        .unwrap(),
+        HandleOutcome::Unknown
+    ));
+    assert!(inner.faults_handle().borrow().all_fired());
+    drop(store);
+    let sage_db_store::open::Opened::Ready(store) =
+        open_existing(fs, Path::new(ROOT), Some(kb()), &Limits::V1, &mut ledger()).unwrap()
+    else {
+        panic!("replacement must replay after losing the acknowledgement");
+    };
+    let decided = proposal_status(&store, 2);
+    assert!(matches!(
+        decided,
+        ProposalStatus::Approved | ProposalStatus::Pending
+    ));
+    let replaced = decided == ProposalStatus::Approved;
+    assert_eq!(read_assertion(&store, 1).retracted, replaced);
+    assert_eq!(
+        matches!(
+            store.record(assertion_key(2), &mut ledger()).unwrap(),
+            sage_db_store::view::RecordLookup::Found { record: FoldedRecord::Assertion(row), .. }
+                 if !row.retracted && row.from == term_key(2) && row.target == term_key(1)
+        ),
+        replaced
+    );
 }

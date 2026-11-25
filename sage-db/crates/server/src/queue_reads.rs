@@ -297,6 +297,12 @@ impl From<RecordKey> for Key {
     }
 }
 
+#[derive(Serialize)]
+struct Baseline {
+    key: Key,
+    revision: Decimal<u64>,
+}
+
 struct Keys<'a>(&'a [RecordKey]);
 
 impl Serialize for Keys<'_> {
@@ -453,6 +459,8 @@ enum Preview<'a> {
         target_slug: &'a str,
         relation: &'static str,
         confidence: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        replaces: Option<Baseline>,
     },
 }
 
@@ -531,6 +539,10 @@ fn proposal_preview<'a>(
                 target_slug,
                 relation: edit.relation.as_str(),
                 confidence: edit.confidence.as_str(),
+                replaces: row.base_revisions.get(2).map(|old| Baseline {
+                    key: old.key.into(),
+                    revision: Decimal(old.revision.get()),
+                }),
             })
         }
         _ => Err(unsupported()),

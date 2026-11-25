@@ -177,6 +177,9 @@ message SubmitPayload {
     LegacyRelationSubmit legacy_relation = 5;
     LegacyConceptSubmit legacy_concept = 6;
     LegacyRelationBySlugSubmit legacy_relation_by_slug = 7;
+    // The envelope read set pins the two new Term endpoints and the old Assertion revision.
+    // Approve via the existing relation_assert review family.
+    RelationAssert relation_replace = 8;
   }
 }
 

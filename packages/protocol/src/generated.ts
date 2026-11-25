@@ -241,7 +241,14 @@ export interface SubmitPayload {
   termCreate?: TermCreate | undefined;
   legacyRelation?: LegacyRelationSubmit | undefined;
   legacyConcept?: LegacyConceptSubmit | undefined;
-  legacyRelationBySlug?: LegacyRelationBySlugSubmit | undefined;
+  legacyRelationBySlug?:
+    | LegacyRelationBySlugSubmit
+    | undefined;
+  /**
+   * The envelope read set pins the two new Term endpoints and the old Assertion revision.
+   * Approve via the existing relation_assert review family.
+   */
+  relationReplace?: RelationAssert | undefined;
 }
 
 /**

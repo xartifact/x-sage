@@ -1249,3 +1249,102 @@ fn review_concept_text_rejects_without_touching_the_subject() {
         sage_db_types::persist::ProposalStatus::Rejected
     );
 }
+
+#[test]
+fn relation_replace_routes_the_generated_request_through_the_authenticated_adapter() {
+    use sage_db_protocol::generated::RelationAssert;
+    use sage_db_store::{fold::FoldedRecord, view::RecordLookup};
+    use sage_db_types::relation::RelationId;
+
+    let (_inner, _fs, mut store) = seed_world();
+    let verifier = verifier();
+    let first = RecordRevision::FIRST;
+    let endpoints = vec![wire_pair(term_key(1), first), wire_pair(term_key(2), first)];
+    let edge = RelationAssert {
+        from: Some(wire_key(term_key(1))),
+        target: Some(wire_key(term_key(2))),
+        relation: Some(u32::from(RelationId::DependsOn.get())),
+        confidence: Some(2),
+        declaration_order: 7,
+        declared_author: String::new(),
+        reason: "seed the edge".to_owned(),
+    };
+    submit(
+        &mut context(&mut store, &verifier, PROPOSER_TOKEN, "original"),
+        &envelope(endpoints, "original"),
+        &SubmitPayload {
+            kind: Some(submit_payload::Kind::RelationAssert(edge)),
+        },
+        &mut ledger(),
+    )
+    .unwrap();
+
+    let approve = |store: &mut Store<ObservingFs>, id, request_id| {
+        let key = proposal_key(id);
+        sage_db_server::commands::review_with_validation(
+            &mut context(store, &verifier, REVIEWER_TOKEN, request_id),
+            &envelope(read_pair_for(key, first), request_id),
+            &ReviewPayload {
+                family: Some(review_payload::Family::RelationAssert(
+                    ReviewDecisionPayload {
+                        proposal: Some(wire_key(key)),
+                        decision: Decision::Approve as i32,
+                        note: "approved dependency direction".to_owned(),
+                    },
+                )),
+            },
+            &mut ledger(),
+            sage_db_types::budget::Budget::DEFAULT,
+            &RunToCompletion,
+        )
+        .unwrap();
+    };
+    approve(&mut store, 1, "original-review");
+    let old = RecordKey::new(RecordKind::Assertion, 1);
+    let wire = r#"{
+      "envelope":{
+        "protocolVersion":1,"kbUuid":"FIXTURE_KB","requestId":"replace",
+        "readSet":[
+          {"key":{"kind":1,"id":"1"},"revision":"1"},
+          {"key":{"kind":1,"id":"2"},"revision":"1"},
+          {"key":{"kind":2,"id":"1"},"revision":"1"}
+        ]
+      },
+      "payload":{"relationReplace":{
+        "from":{"kind":1,"id":"2"},"target":{"kind":1,"id":"1"},
+        "relation":3,"confidence":2,"declarationOrder":7,
+        "reason":"Correct the dependency direction"
+      }}
+    }"#
+    .replace("FIXTURE_KB", &kb().to_string());
+    let mut attempt = ledger();
+    let decoded = sage_db_protocol::ingress::decode_submit_proposal_request(
+        wire.as_bytes(),
+        sage_db_protocol::ingress::IngressLimits::new(4096, 4096),
+        &mut attempt,
+    )
+    .unwrap();
+    let dto = decoded.dto();
+    let queued = submit(
+        &mut context(&mut store, &verifier, PROPOSER_TOKEN, "replace"),
+        dto.envelope.as_ref().unwrap(),
+        dto.payload.as_ref().unwrap(),
+        &mut attempt,
+    )
+    .unwrap();
+    assert_eq!(queued.command, WriteCommand::SubmitRelationReplace);
+    approve(&mut store, 2, "replace-review");
+    assert_eq!(
+        proposal_at(&store, proposal_key(2)).status,
+        sage_db_types::persist::ProposalStatus::Approved,
+    );
+    assert!(matches!(
+        store.record(old, &mut ledger()).unwrap(),
+        RecordLookup::Found { record: FoldedRecord::Assertion(row), .. } if row.retracted
+    ));
+    assert!(matches!(
+        store.record(RecordKey::new(RecordKind::Assertion, 2), &mut ledger()).unwrap(),
+        RecordLookup::Found { record: FoldedRecord::Assertion(row), .. }
+            if !row.retracted && row.from == term_key(2) && row.target == term_key(1)
+    ));
+}

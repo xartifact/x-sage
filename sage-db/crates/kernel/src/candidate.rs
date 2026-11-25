@@ -26,6 +26,10 @@ use crate::claims::{CommandError, InternalDefect, admitted_vec, version_next};
 pub(crate) enum Addition<'a> {
     Term(TermMeta),
     Assertion(AssertionRecord),
+    ReplaceAssertion {
+        retract: AssertionId,
+        add: AssertionRecord,
+    },
     TermWithAssertions(TermMeta, &'a [AssertionRecord]),
 }
 
@@ -96,19 +100,30 @@ fn build(
     addition: Addition<'_>,
     ledger: &mut dyn SharedLedger,
 ) -> Result<BaseGraph, CommandError> {
-    let (term, added_assertions) = match &addition {
-        Addition::Term(term) => (Some(*term), &[][..]),
-        Addition::Assertion(assertion) => (None, std::slice::from_ref(assertion)),
-        Addition::TermWithAssertions(term, assertions) => (Some(*term), *assertions),
+    let (term, added_assertions, retracted) = match &addition {
+        Addition::Term(term) => (Some(*term), &[][..], None),
+        Addition::Assertion(assertion) => (None, std::slice::from_ref(assertion), None),
+        Addition::ReplaceAssertion { retract, add } => {
+            (None, std::slice::from_ref(add), Some(*retract))
+        }
+        Addition::TermWithAssertions(term, assertions) => (Some(*term), *assertions, None),
+    };
+    let included = |row: &sage_db_types::persist::AssertionRecordFull| {
+        !row.retracted && Some(AssertionId::new(row.key.id())) != retracted
     };
     let mut term_count = 0usize;
     let mut assertion_count = 0usize;
+    let mut found_retraction = false;
     let scanned = store
         .scan_identified_records(ledger, |row, work| {
             work.checkpoint()?;
             let count = match row {
                 FoldedRecord::Term(term) if !term.retired => &mut term_count,
-                FoldedRecord::Assertion(assertion) if !assertion.retracted => &mut assertion_count,
+                FoldedRecord::Assertion(assertion) if included(assertion) => &mut assertion_count,
+                FoldedRecord::Assertion(assertion) if !assertion.retracted => {
+                    found_retraction = true;
+                    return Ok(());
+                }
                 _ => return Ok(()),
             };
             *count = count
@@ -117,7 +132,7 @@ fn build(
             Ok(())
         })
         .map_err(scan_error)?;
-    if scanned != basis.basis {
+    if scanned != basis.basis || found_retraction != retracted.is_some() {
         return Err(CommandError::BasisDivergence);
     }
     let mut terms = admitted_vec(
@@ -143,7 +158,7 @@ fn build(
                     });
                 }
                 FoldedRecord::Assertion(row)
-                    if !row.retracted && assertions.len() < assertion_count =>
+                    if included(row) && assertions.len() < assertion_count =>
                 {
                     assertions.push(AssertionRecord {
                         id: AssertionId::new(row.key.id()),
@@ -157,7 +172,7 @@ fn build(
                 FoldedRecord::Term(term) if !term.retired => {
                     return Err(CommandError::BasisDivergence);
                 }
-                FoldedRecord::Assertion(row) if !row.retracted => {
+                FoldedRecord::Assertion(row) if included(row) => {
                     return Err(CommandError::BasisDivergence);
                 }
                 _ => {}

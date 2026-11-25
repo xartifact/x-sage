@@ -269,3 +269,10 @@ case!(
     sage_db_protocol::ingress::decode_write_outcome,
     r#"{"committed":{"recorded":{"affected":[{}],"counters":[{}],"commitVersion":"x","resultRef":"x"},"submit":{"proposal":{"kind":1,"id":"x"}}}}"#
 );
+
+case!(
+    relation_replacement_uses_the_new_submit_arm_and_keeps_its_baselines,
+    g::SubmitProposalRequest,
+    sage_db_protocol::ingress::decode_submit_proposal_request,
+    r#"{"envelope":{"protocolVersion":1,"kbUuid":"77777777777777777777777777777777","requestId":"fix-direction","readSet":[{"key":{"kind":1,"id":"1"},"revision":"3"},{"key":{"kind":1,"id":"2"},"revision":"4"},{"key":{"kind":2,"id":"3"},"revision":"2"}]},"payload":{"relationReplace":{"from":{"kind":1,"id":"2"},"target":{"kind":1,"id":"1"},"relation":3,"confidence":2,"reason":"Correct the dependency direction"}}}"#
+);

@@ -594,7 +594,10 @@ fn validate_submit_with_walk<'a>(
             walk.field("claim_edit.declared_author", &edit.declared_author)?;
             Ok(Validated { message: payload })
         }
-        Some(crate::generated::submit_payload::Kind::RelationAssert(edge)) => {
+        Some(
+            crate::generated::submit_payload::Kind::RelationAssert(edge)
+            | crate::generated::submit_payload::Kind::RelationReplace(edge),
+        ) => {
             walk.relation_submit(edge)?;
             Ok(Validated { message: payload })
         }

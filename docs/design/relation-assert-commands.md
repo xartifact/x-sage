@@ -12,7 +12,7 @@ A submitter proposes that `from --relation--> target` should exist. On approval 
 **new, independent** [`AssertionRecord`] — never a revision, never a replacement. Two people
 asserting the same triple are two supports with two identities, because that is what they are.
 
-This batch does **not** revise, retract or replace assertions, and does not touch any existing
+The original add-only operation does not revise or retract assertions, and does not touch any existing
 edge.
 
 ## 2. Operations and exact payload bytes
@@ -167,7 +167,7 @@ test approves an edge the proposal never named).
 * Platform durability is not claimed, and `Unknown` is exercised as the ambiguous attempt it is.
 * No phase, P4, cutover, activation or readiness claim.
 * Test-local allocations are not allocator or RSS evidence.
-* Assertions are only created here; revision and retraction lifecycles remain out of scope.
+* The v1 add-only operation creates assertions. The separately versioned replacement below is the supported withdrawal path.
 
 ## Declared attribution boundary
 
@@ -178,3 +178,34 @@ use the same bound; NUL is refused. Approval preserves attribution and records
 the authenticated reviewer separately. Root corrected the earlier nonempty /
 200-byte admission in a new candidate, with literal zero/800 length fields,
 801-byte rejection on both codec paths and real submit/approve boundary cases.
+
+## Atomic replacement through the native proposal API
+
+Use this when one authored Assertion is wrong and its replacement must become
+active in the same commit. Use `x-sage native read-term-document` with the Read
+credential to get the old assertion's key and revision (filter by target slug
+and relation), along with the endpoint Term keys and revisions. If there are
+multiple supports for the same edge, choose the exact assertion to replace.
+Other supports retain their original identity and remain active.
+
+With the Propose credential, send `x-sage native submit` a ProtoJSON request
+whose `payload.relationReplace` is the same edge body accepted by
+`payload.relationAssert`. Its envelope must pin exactly three rows in
+`readSet`. Put the two replacement Term endpoints first in ascending Term
+key order, followed by the old Assertion. Each key is its kind and a decimal
+string ID, and each revision is a decimal string. Term kind is 1 and Assertion
+kind is 2. A stale, absent, or inactive old assertion is refused.
+
+The request is stored as operation 10 version 4, with the version 1 edge
+payload and the three exact frame baselines. The review is the existing
+`payload.relationAssert` family with the new proposal's key and revision in
+its review envelope. Use a Review credential and a separate request ID.
+The native proposal preview exposes the old key and revision in `replaces`.
+Approval checks all baselines and validates the resulting active graph using
+the committed profile, with only the specified old support excluded. On
+success one commit records the old assertion's retraction and next revision,
+the new assertion under a fresh ID, the approved proposal and the outcome.
+On a stale baseline after submission, approval records a conflict and
+changes neither assertion. Rejection changes only the proposal. Graph
+validation failure keeps the proposal pending and writes nothing. An
+identical retry returns the recorded outcome.

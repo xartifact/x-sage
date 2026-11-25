@@ -806,7 +806,8 @@ fn command_error(error: CommandRefusal) -> Failure {
                 "relation violates the committed graph rules",
             ),
             sage_db_kernel::relations::RelationAssertError::Input(
-                sage_db_kernel::relations::RelationAssertInputError::StaleEndpoint { .. },
+                sage_db_kernel::relations::RelationAssertInputError::StaleEndpoint { .. }
+                | sage_db_kernel::relations::RelationAssertInputError::StaleAssertion(_),
             ) => conflict(ErrorCode::Conflict, "relation endpoint baseline changed"),
             sage_db_kernel::relations::RelationAssertError::Input(
                 sage_db_kernel::relations::RelationAssertInputError::TargetSlugUnresolved,

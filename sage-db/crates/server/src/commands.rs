@@ -112,6 +112,8 @@ pub enum WriteCommand {
     ReviewConceptText,
     /// An authored relation submission.
     SubmitRelationAssert,
+    /// A relation replacement pinning an existing support.
+    SubmitRelationReplace,
     /// A compatibility edge proposal.
     SubmitLegacyRelation,
     /// A compatibility atom or body proposal.
@@ -345,6 +347,19 @@ fn submit_core<F: FileSystem>(
         submit_payload::Kind::RelationAssert(edge) => (
             WriteCommand::SubmitRelationAssert,
             relations::submit_relation_assert(
+                context.store,
+                &grants,
+                meta,
+                relation_draft(edge)?,
+                &read_set,
+                &context.limits,
+                ledger,
+            )
+            .map_err(CommandRefusal::Relation)?,
+        ),
+        submit_payload::Kind::RelationReplace(edge) => (
+            WriteCommand::SubmitRelationReplace,
+            relations::submit_relation_replace(
                 context.store,
                 &grants,
                 meta,

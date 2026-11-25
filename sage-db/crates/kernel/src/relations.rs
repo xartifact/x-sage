@@ -1,4 +1,4 @@
-//! Relation-assert proposals: submit a NEW authored assertion, then approve or reject it.
+//! Submit an authored assertion or a scoped replacement, then approve or reject it.
 //!
 //! # What this module is
 //!
@@ -22,14 +22,13 @@
 //!
 //! # What approval means, and what it does not
 //!
-//! The candidate assertion is a **new support**, never a replacement or a revision. A duplicate
+//! The candidate assertion is a **new support** with a fresh identity. A duplicate
 //! `(from, relation, target)` triple is a separate assertion with its own identity, because
-//! two people asserting the same edge are two pieces of evidence. This batch does not revise,
-//! retract or replace anything.
+//! two people asserting the same edge are two pieces of evidence. A replacement pins one
+//! active assertion revision and withdraws that support atomically with creating the new one.
 //!
-//! Before anything is written, the **entire current active graph plus the proposed assertion** is
-//! validated by [`sage_db_infer::validate_candidate`] under the rule profile the store actually
-//! committed. That is the canonical validator — V1–V7 rules live there and nowhere here. A
+//! Approval validates the entire resulting active graph under the committed rule profile using
+//! [`sage_db_infer::validate_candidate`]. For replacements the candidate omits the pinned support. A
 //! candidate the rules reject returns a typed validation refusal and **no** write: the proposal
 //! stays `Pending` so the reviewer can reject it with a different request.
 //!
@@ -83,6 +82,10 @@ pub const REVIEW_RELATION_ASSERT: u16 = 11;
 
 /// The only operation version this build implements.
 pub const OPERATION_VERSION: u16 = 1;
+
+// Operation 10 v4 uses the v1 payload and a third read-set row pinning an Assertion.
+// The legacy filename formats already use versions 2 and 3.
+const REPLACEMENT_SUBMIT_VERSION: u16 = 4;
 
 /// The decision value that approves.
 pub const DECISION_APPROVE: u16 = 0;
@@ -615,6 +618,8 @@ pub enum RelationAssertInputError {
     AssertionIdCollision(RecordKey),
     /// An endpoint term does not exist on the current basis.
     MissingEndpoint(RecordKey),
+    /// The required old support is absent, retracted, or at a different revision.
+    StaleAssertion(RevPair),
     /// A newly submitted slug already has an established Term identity.
     TargetSlugAlreadyExists,
     /// The authored target slug has no active Term during review.
@@ -759,6 +764,36 @@ pub fn submit_relation_assert<'a, F: FileSystem>(
         meta,
         request.with_target(SubmitTarget::Key(request.target)),
         None,
+        false,
+        read_set,
+        limits,
+        ledger,
+    )
+}
+
+/// Propose an atomic replacement of the Assertion pinned by the third read-set row.
+///
+/// The first two rows pin the new endpoints in key order. Approval uses
+/// [`review_relation_assert`] and the exact replacement stored in the proposal.
+///
+/// # Errors
+/// As [`submit_relation_assert`], plus a missing, retracted, or stale Assertion baseline.
+pub fn submit_relation_replace<F: FileSystem>(
+    store: &mut Store<F>,
+    grants: &Grants<'_>,
+    meta: RequestMeta<'_>,
+    request: RelationAssert<'_>,
+    read_set: &[RevPair],
+    limits: &Limits,
+    ledger: &mut dyn LeaseLedger,
+) -> Result<HandleOutcome, RelationAssertError> {
+    submit_relation_assert_inner(
+        store,
+        grants,
+        meta,
+        request.with_target(SubmitTarget::Key(request.target)),
+        None,
+        true,
         read_set,
         limits,
         ledger,
@@ -786,6 +821,7 @@ pub fn submit_legacy_relation_assert<F: FileSystem>(
         meta,
         request.with_target(SubmitTarget::Key(request.target)),
         Some(legacy),
+        false,
         read_set,
         limits,
         ledger,
@@ -814,6 +850,7 @@ pub fn submit_legacy_relation_by_slug<F: FileSystem>(
         meta,
         request.with_target(SubmitTarget::Slug(request.target)),
         Some(legacy),
+        false,
         read_set,
         limits,
         ledger,
@@ -827,6 +864,7 @@ fn submit_relation_assert_inner<F: FileSystem>(
     meta: RequestMeta<'_>,
     request: RelationAssert<'_, SubmitTarget<'_>>,
     legacy: Option<LegacyProposal<'_>>,
+    replace: bool,
     read_set: &[RevPair],
     limits: &Limits,
     ledger: &mut dyn LeaseLedger,
@@ -834,15 +872,17 @@ fn submit_relation_assert_inner<F: FileSystem>(
     let authorized = grants.authorize(store.kb_uuid(), Capability::Propose, ledger)?;
     check_meta(&meta, authorized.principal())?;
 
+    let (endpoints, replaced) = split_read_set(read_set, replace)?;
     let (operation_version, payload) = match (request.target, legacy) {
         (SubmitTarget::Key(key), legacy) => {
-            check_endpoint_read_set(read_set, request.from, key)?;
+            check_endpoint_read_set(endpoints, request.from, key)?;
             let payload = encode_submit(&request.with_target(key), ledger)?;
             match legacy {
                 Some(options) => (
                     legacy_proposal::SUBMIT_RELATION_VERSION,
                     legacy_proposal::encode(options.file, &payload, ledger)?,
                 ),
+                None if replace => (REPLACEMENT_SUBMIT_VERSION, payload),
                 None => (OPERATION_VERSION, payload),
             }
         }
@@ -885,7 +925,7 @@ fn submit_relation_assert_inner<F: FileSystem>(
     // Every named identity must be active and pinned. A slug-only target has no
     // revision baseline and is independently checked on the same publication.
     let (mut from_slug, mut target_slug) = (None, None);
-    for row in read_set {
+    for row in endpoints {
         let found = folded_current(store, row.key, ledger)?
             .ok_or(RelationAssertInputError::MissingEndpoint(row.key))?;
         let FoldedRecord::Term(term) = found else {
@@ -932,6 +972,12 @@ fn submit_relation_assert_inner<F: FileSystem>(
                 InternalDefect::EncodeDecodeDivergence,
             ))?,
         )?;
+    }
+
+    if let Some(old) = replaced
+        && active_assertion(store, old, ledger)?.is_none()
+    {
+        return Err(RelationAssertInputError::StaleAssertion(old).into());
     }
 
     let proposal_id = basis
@@ -1142,6 +1188,42 @@ fn check_endpoint_read_set(
     Ok(())
 }
 
+fn split_read_set(
+    read_set: &[RevPair],
+    replace: bool,
+) -> Result<(&[RevPair], Option<RevPair>), RelationAssertError> {
+    if !replace {
+        return Ok((read_set, None));
+    }
+    let [_, _, old] = read_set else {
+        return Err(InputError::ReadSetLength {
+            expected: 3,
+            found: read_set.len(),
+        }
+        .into());
+    };
+    check_key(old.key, RecordKind::Assertion)?;
+    if old.revision.get() == 0 {
+        return Err(InputError::ZeroRevision { index: 2 }.into());
+    }
+    Ok((&read_set[..2], Some(*old)))
+}
+
+fn active_assertion<'a, F: FileSystem>(
+    store: &'a Store<F>,
+    baseline: RevPair,
+    ledger: &mut dyn LeaseLedger,
+) -> Result<Option<&'a AssertionRecordFull>, RelationAssertError> {
+    match folded_current(store, baseline.key, ledger)? {
+        Some(FoldedRecord::Assertion(row))
+            if !row.retracted && row.revision == baseline.revision =>
+        {
+            Ok(Some(row))
+        }
+        _ => Ok(None),
+    }
+}
+
 /// The stored proposal as review needs it, with its ONE leased payload read.
 struct StoredProposal {
     record: ProposalRecord,
@@ -1248,7 +1330,12 @@ pub fn decode_stored_intent<'a>(
             .into());
         }
     };
-    if operation.kind != SUBMIT_RELATION_ASSERT || operation.version != OPERATION_VERSION {
+    if operation.kind != SUBMIT_RELATION_ASSERT
+        || !matches!(
+            operation.version,
+            OPERATION_VERSION | REPLACEMENT_SUBMIT_VERSION
+        )
+    {
         return Err(CommandError::Input(InputError::UnsupportedStoredOperation {
             kind: operation.kind,
             version: operation.version,
@@ -1269,37 +1356,23 @@ pub fn decode_stored_intent<'a>(
         ))
         .into());
     }
-    // The proposal's baselines are the required endpoints, and the frame's read set must be
-    // exactly them — so the reviewer cannot narrow what the submitter pinned.
-    if record.base_revisions.len() != 2 {
-        return Err(CommandError::Input(InputError::StoredMetadataMismatch(
+    // The frame and proposal must agree on exactly the two endpoints and, for v4,
+    // the old assertion. An ordinary addition cannot acquire replacement semantics.
+    let replace = operation.version == REPLACEMENT_SUBMIT_VERSION;
+    let metadata_mismatch = |_| {
+        CommandError::Input(InputError::StoredMetadataMismatch(
             StoredField::BaseRevisions,
         ))
-        .into());
+    };
+    let (endpoints, _) =
+        split_read_set(&record.base_revisions, replace).map_err(metadata_mismatch)?;
+    if endpoints.len() != 2 {
+        return Err(InputError::StoredMetadataMismatch(StoredField::BaseRevisions).into());
     }
     if decoded.read_set != record.base_revisions {
-        return Err(
-            CommandError::Input(InputError::StoredMetadataMismatch(StoredField::ReadSet)).into(),
-        );
+        return Err(InputError::StoredMetadataMismatch(StoredField::ReadSet).into());
     }
-    // The two baselines must be exactly the payload's endpoints.
-    let (first, second) = if intent.from < intent.target {
-        (intent.from, intent.target)
-    } else {
-        (intent.target, intent.from)
-    };
-    let [left, right] = record.base_revisions.as_slice() else {
-        return Err(CommandError::Input(InputError::StoredMetadataMismatch(
-            StoredField::BaseRevisions,
-        ))
-        .into());
-    };
-    if left.key != first || right.key != second {
-        return Err(CommandError::Input(InputError::StoredMetadataMismatch(
-            StoredField::BaseRevisions,
-        ))
-        .into());
-    }
+    check_endpoint_read_set(endpoints, intent.from, intent.target).map_err(metadata_mismatch)?;
     Ok(intent)
 }
 
@@ -1582,7 +1655,7 @@ fn review_relation_inner<F: FileSystem>(
 
     // The compatibility variant resolves the latest alias on the reviewer's view.
     // Native review still requires both of its submitted endpoint revisions.
-    let (mut intent, conflicted) = if legacy.is_some() {
+    let (mut intent, conflicted, replaced) = if legacy.is_some() {
         let Some(legacy) =
             legacy_proposal::decode_stored(&stored.record, stored.payload.as_bytes(), ledger)?
         else {
@@ -1611,17 +1684,23 @@ fn review_relation_inner<F: FileSystem>(
             }
             LegacyIntent::Text(_) => return Err(InputError::LegacyProposalMetadata.into()),
         };
-        (intent, false)
+        (intent, false, None)
     } else {
         let intent = decode_stored_intent(&stored.record, stored.payload.as_bytes(), ledger)?;
         let mut conflicted = false;
+        let mut replaced = None;
         for row in &stored.record.base_revisions {
-            let current = folded_current(store, row.key, ledger)?;
-            let matches = matches!(current, Some(FoldedRecord::Term(term))
-                if !term.retired && term.revision == row.revision);
+            let matches = if row.key.kind() == RecordKind::Assertion {
+                replaced = active_assertion(store, *row, ledger)?;
+                replaced.is_some()
+            } else {
+                let current = folded_current(store, row.key, ledger)?;
+                matches!(current, Some(FoldedRecord::Term(term))
+                    if !term.retired && term.revision == row.revision)
+            };
             conflicted |= !matches;
         }
-        (intent, conflicted)
+        (intent, conflicted, replaced)
     };
     if conflicted {
         let mut next = stored.record;
@@ -1712,17 +1791,25 @@ fn review_relation_inner<F: FileSystem>(
         changed_fields: None,
     };
 
+    let addition = sage_db_types::record::AssertionRecord {
+        id: AssertionId::new(assertion_id),
+        revision: RecordRevision::FIRST,
+        from: candidate::term_id(intent.from)?,
+        target: candidate::term_id(intent.target)?,
+        relation: intent.relation,
+        confidence: intent.confidence,
+    };
+    let candidate = match replaced {
+        Some(old) => Addition::ReplaceAssertion {
+            retract: AssertionId::new(old.key.id()),
+            add: addition,
+        },
+        None => Addition::Assertion(addition),
+    };
     candidate::validate(
         store,
         &basis,
-        Addition::Assertion(sage_db_types::record::AssertionRecord {
-            id: AssertionId::new(assertion_id),
-            revision: RecordRevision::FIRST,
-            from: candidate::term_id(intent.from)?,
-            target: candidate::term_id(intent.target)?,
-            relation: intent.relation,
-            confidence: intent.confidence,
-        }),
+        candidate,
         validation_budget,
         validation_control,
         ledger,
@@ -1744,6 +1831,9 @@ fn review_relation_inner<F: FileSystem>(
         extensions: Extensions::new(),
     };
 
+    let retracted = replaced
+        .map(|old| retract_assertion(old, authorized.principal(), note, meta.created_at, ledger))
+        .transpose()?;
     let mut next = stored.record;
     let proposal_next = decide_proposal(
         &mut next,
@@ -1755,21 +1845,32 @@ fn review_relation_inner<F: FileSystem>(
     )?;
 
     let version = version_next(store.head())?;
-    // Canonical ascending order by key: the assertion (kind 2) sorts before the proposal
-    // (kind 7), and `result_payload` refuses an unordered affected set.
-    let affected = [
-        RevPair {
-            key: assertion_key,
-            revision: RecordRevision::FIRST,
-        },
-        RevPair {
-            key: next.key,
-            revision: proposal_next,
-        },
-    ];
+    let added = RevPair {
+        key: assertion_key,
+        revision: RecordRevision::FIRST,
+    };
+    let decided = RevPair {
+        key: next.key,
+        revision: proposal_next,
+    };
+    let affected = [added, decided];
+    let replaced_affected = retracted.as_ref().map(|old| {
+        let removed = RevPair {
+            key: old.key,
+            revision: old.revision,
+        };
+        if removed.key < added.key {
+            [removed, added, decided]
+        } else {
+            [added, removed, decided]
+        }
+    });
+    let affected = replaced_affected
+        .as_ref()
+        .map_or(affected.as_slice(), |rows| rows.as_slice());
     let counters = [allocation.allocation];
     let result_bytes =
-        typed::result_payload(version, &affected, &counters, ledger).map_err(CommandError::from)?;
+        typed::result_payload(version, affected, &counters, ledger).map_err(CommandError::from)?;
     let result_ref = map_format(typed::raw_hash(&result_bytes, ledger))?;
     let outcome = outcome_event(
         version,
@@ -1781,7 +1882,13 @@ fn review_relation_inner<F: FileSystem>(
         ledger,
     )?;
 
-    let mut events: Vec<OwnedEvent> = admitted_vec(4, ledger)?;
+    let mut events: Vec<OwnedEvent> = admitted_vec(4 + usize::from(retracted.is_some()), ledger)?;
+    if let Some(old) = &retracted {
+        events.push(map_format(typed::prepare_event(
+            EventInput::Assertion(typed::AssertionEvent::Retracted, old),
+            ledger,
+        ))?);
+    }
     events.push(map_format(typed::prepare_event(
         EventInput::Assertion(sage_db_format_assertion_event(), &proposed),
         ledger,
@@ -1832,6 +1939,35 @@ fn review_relation_inner<F: FileSystem>(
     )?;
     prepared.expect_version = expect_version;
     into_outcome(store.commit(prepared, limits, ledger))
+}
+
+fn retract_assertion(
+    old: &AssertionRecordFull,
+    reviewer: &str,
+    note: &str,
+    updated_at: i64,
+    ledger: &mut dyn SharedLedger,
+) -> Result<AssertionRecordFull, RelationAssertError> {
+    let old_event = if old.revision == RecordRevision::FIRST {
+        typed::AssertionEvent::Created
+    } else {
+        typed::AssertionEvent::Revised
+    };
+    let typed::DispatchedPayload::Assertion(mut row) = map_format(typed::copy_payload(
+        EventInput::Assertion(old_event, old),
+        ledger,
+    ))?
+    else {
+        return Err(CommandError::Internal(InternalDefect::EncodeDecodeDivergence).into());
+    };
+    row.revision = revision_next(row.revision)?;
+    row.retracted = true;
+    row.common.recorded_by = Some(admitted_string(reviewer, ledger)?);
+    row.common.reason = Some(admitted_string(note, ledger)?);
+    row.common.actor_origin = ActorOrigin::Authenticated;
+    row.common.updated_at = Some(updated_at);
+    row.changed_fields = None;
+    Ok(row)
 }
 
 fn legacy_append_order(
