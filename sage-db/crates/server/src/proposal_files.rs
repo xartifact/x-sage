@@ -72,7 +72,8 @@ pub(crate) fn serve(
         return Err(Failure::internal());
     }
     let mut owners = reserve(keys.len(), ledger)?;
-    let mut remaining = http::MAX_RESPONSE as u64 + if raw_bodies { MAX_RAW_BODIES } else { 0 };
+    let mut remaining =
+        http::MAX_BATCH_RESPONSE as u64 + if raw_bodies { MAX_RAW_BODIES } else { 0 };
     for key in keys {
         step(ledger)?;
         let RecordImageLookup::Found {
@@ -151,7 +152,7 @@ pub(crate) fn serve(
             .iter()
             .any(|file| file.body.as_ref().is_some_and(|body| body.tail.is_some()))
     {
-        return http::respond(stream, &reply, deadline, ledger).map_err(render_error);
+        return http::respond_batch(stream, &reply, deadline, ledger);
     }
     respond_with_raw_bodies(stream, &reply, deadline, ledger)
 }
@@ -162,8 +163,8 @@ fn respond_with_raw_bodies(
     deadline: &Deadline,
     ledger: &mut AttemptLedger<'_>,
 ) -> Result<(), Failure> {
-    let mut scratch = [0u8; http::MAX_RESPONSE];
-    let metadata = http::render(&mut scratch, ledger, |out| {
+    let mut scratch = http::batch_response_buffer(ledger)?;
+    let metadata = http::render_prepaid(&mut scratch, ledger, |out| {
         serde_json::to_writer(out, reply).map_err(std::io::Error::from)
     })
     .map_err(render_error)?;

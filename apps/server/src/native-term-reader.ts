@@ -10,6 +10,8 @@ import { ApiError } from "../../../packages/service/src/http.ts";
 
 const SERVICE_PATH = "/sage.v1.SageCommandService/";
 const MAX_RESPONSE_BYTES = 128 * 1024;
+// Matches MAX_BATCH_RESPONSE in the native HTTP server.
+const MAX_BATCH_RESPONSE_BYTES = 512 * 1024;
 const MAX_TERM_BODY_BYTES = 256 * 1024;
 const MAX_PROPOSAL_RAW_BYTES = 2 * 1024 * 1024;
 const MAX_DIRECT_METADATA_BYTES = 256 * 1024;
@@ -118,7 +120,7 @@ function decodeProposalFrame(payload: ArrayBuffer): unknown {
   if (payload.byteLength < TERM_FRAME_PREFIX) throw unavailable();
   const size = new DataView(payload).getUint32(0, true);
   let start = TERM_FRAME_PREFIX + size;
-  if (size > MAX_RESPONSE_BYTES || start > payload.byteLength ||
+  if (size > MAX_BATCH_RESPONSE_BYTES || start > payload.byteLength ||
       payload.byteLength - start > MAX_PROPOSAL_RAW_BYTES) throw unavailable();
   const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   const metadata: unknown = JSON.parse(decoder.decode(new Uint8Array(payload, TERM_FRAME_PREFIX, size)));
@@ -361,7 +363,8 @@ export function connectNativeTermReader(options: {
     const length = response.headers.get("content-length");
     const framed = (acceptsTermFrame || acceptsProposalFrame) && response.ok && response.headers.get("content-type") === "application/octet-stream";
     const tailLimit = acceptsProposalFrame ? MAX_PROPOSAL_RAW_BYTES : MAX_TERM_BODY_BYTES;
-    const maxBytes = framed ? TERM_FRAME_PREFIX + MAX_RESPONSE_BYTES + tailLimit : MAX_RESPONSE_BYTES;
+    const replyLimit = acceptsProposalFrame || method === "ReadGraphSnapshot" ? MAX_BATCH_RESPONSE_BYTES : MAX_RESPONSE_BYTES;
+    const maxBytes = framed ? TERM_FRAME_PREFIX + replyLimit + tailLimit : replyLimit;
     if (!length || !/^[0-9]+$/.test(length) || Number(length) > maxBytes) {
       await response.body?.cancel();
       throw unavailable();
@@ -394,8 +397,12 @@ export function connectNativeTermReader(options: {
     };
     const response = await exchange(method, payload, options.token, signal);
     const { data } = response;
-    if (response.status === 404 && record(record(data)?.error)?.code === "ERROR_CODE_INVALID_ARGUMENT") {
+    const code = record(record(data)?.error)?.code;
+    if (response.status === 404 && code === "ERROR_CODE_INVALID_ARGUMENT") {
       return null;
+    }
+    if (response.status === 429 && code === "ERROR_CODE_BUDGET") {
+      throw new ApiError(503, "Database read exceeded its resource budget");
     }
     if (!response.ok) throw unavailable();
     return { data };

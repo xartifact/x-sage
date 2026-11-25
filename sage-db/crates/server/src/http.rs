@@ -13,6 +13,9 @@ use serde::Serialize;
 
 pub(crate) const MAX_BODY: usize = 256 * 1024;
 pub(crate) const MAX_RESPONSE: usize = 128 * 1024;
+// Complete graph snapshots and proposal lists grow with the knowledge base.
+// Their larger, ledger-admitted buffers do not change single-record limits.
+pub(crate) const MAX_BATCH_RESPONSE: usize = 512 * 1024;
 // The named private direct-concept frame has separately bounded JSON metadata
 // and raw UTF-8. Existing JSON methods retain MAX_BODY.
 pub(crate) const DIRECT_CONCEPT_PREFIX: usize = 4;
@@ -609,6 +612,41 @@ pub(crate) fn render<'a>(
     render_in(buffer, ledger, false, write)
 }
 
+pub(crate) fn render_prepaid<'a>(
+    buffer: &'a mut [u8],
+    ledger: &mut dyn SharedLedger,
+    write: impl FnOnce(&mut dyn Write) -> io::Result<()>,
+) -> io::Result<&'a [u8]> {
+    render_in(buffer, ledger, true, write)
+}
+
+pub(crate) fn batch_response_buffer(ledger: &mut dyn SharedLedger) -> Result<Vec<u8>, Failure> {
+    ledger
+        .checkpoint()
+        .map_err(|stop| Failure::refused(Refusal::Stopped(stop)))?;
+    let mut buffer = crate::activation::reserve(MAX_BATCH_RESPONSE, ledger)?;
+    buffer.resize(MAX_BATCH_RESPONSE, 0);
+    Ok(buffer)
+}
+
+pub(crate) fn respond_batch(
+    stream: &TcpStream,
+    value: &impl Serialize,
+    deadline: &Deadline,
+    ledger: &mut dyn SharedLedger,
+) -> Result<(), Failure> {
+    let mut buffer = batch_response_buffer(ledger)?;
+    respond_prepaid(
+        stream,
+        "application/json",
+        &mut buffer,
+        deadline,
+        ledger,
+        |out| serde_json::to_writer(out, value).map_err(io::Error::from),
+    )
+    .map_err(crate::activation::render_error)
+}
+
 fn render_in<'a>(
     buffer: &'a mut [u8],
     ledger: &mut dyn SharedLedger,
@@ -648,7 +686,7 @@ pub(crate) fn respond_prepaid(
     ledger: &mut dyn SharedLedger,
     write: impl FnOnce(&mut dyn Write) -> io::Result<()>,
 ) -> io::Result<()> {
-    let body = render_in(buffer, ledger, true, write)?;
+    let body = render_prepaid(buffer, ledger, write)?;
     send_rendered(stream, "200 OK", content_type, body, deadline);
     Ok(())
 }
@@ -836,6 +874,53 @@ fn finish_error(mut stream: &TcpStream, until: Instant) {
 #[cfg(test)]
 mod tests {
     use super::{Failure, MAX_BODY, parse_head};
+
+    #[test]
+    fn batch_json_respects_both_the_old_and_the_batch_reply_extents() {
+        use std::io::{ErrorKind, Write};
+
+        use sage_db_store::lease::AttemptLedger;
+        use sage_db_types::query::RunToCompletion;
+
+        let payload = "x".repeat(super::MAX_RESPONSE);
+        let mut ledger =
+            AttemptLedger::open(super::MAX_BATCH_RESPONSE as u64, 16, &RunToCompletion).unwrap();
+        let mut batch = super::batch_response_buffer(&mut ledger).ok().unwrap();
+        let rendered = super::render_prepaid(&mut batch, &mut ledger, |out| {
+            serde_json::to_writer(out, &payload).map_err(std::io::Error::from)
+        })
+        .unwrap();
+        assert_eq!(rendered.len(), super::MAX_RESPONSE + 2);
+        assert_eq!(rendered.first(), Some(&b'"'));
+        assert_eq!(rendered.last(), Some(&b'"'));
+
+        let mut ledger =
+            AttemptLedger::open(super::MAX_BATCH_RESPONSE as u64, 16, &RunToCompletion).unwrap();
+        let mut single = [0; super::MAX_RESPONSE];
+        let write = |out: &mut dyn Write| {
+            serde_json::to_writer(out, &payload).map_err(std::io::Error::from)
+        };
+        assert_eq!(
+            super::render(&mut single, &mut ledger, write)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::WriteZero
+        );
+        let oversized = vec![b'x'; super::MAX_BATCH_RESPONSE + 1];
+        assert_eq!(
+            super::render_prepaid(&mut batch, &mut ledger, |out| out.write_all(&oversized))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::WriteZero
+        );
+        let mut short =
+            AttemptLedger::open((super::MAX_BATCH_RESPONSE - 1) as u64, 16, &RunToCompletion)
+                .unwrap();
+        assert_eq!(
+            super::batch_response_buffer(&mut short).err().unwrap().code,
+            sage_db_protocol::generated::ErrorCode::Budget
+        );
+    }
 
     fn parse(raw: &[u8]) -> Result<super::Head<'_>, Failure> {
         let end = raw.windows(4).position(|part| part == b"\r\n\r\n").unwrap() + 4;

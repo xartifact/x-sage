@@ -5,7 +5,7 @@ import { connectNativeTermReader } from "./native-term-reader.ts";
 
 const basis = { kbUuid: "7".repeat(32), version: "1", manifestSha256: "a".repeat(64) };
 
-function fixture(bodyBasis: typeof basis) {
+function fixture(bodyBasis: typeof basis, paddingBytes = 0, graphBudgetRefusal = false) {
   const methods: string[] = [];
   const worker = Bun.serve({
     hostname: "127.0.0.1",
@@ -13,13 +13,15 @@ function fixture(bodyBasis: typeof basis) {
     fetch(request) {
       const method = new URL(request.url).pathname.split("/").at(-1)!;
       methods.push(method);
-      const data = method === "ReadGraphSnapshot" ? {
+      const refused = method === "ReadGraphSnapshot" && graphBudgetRefusal;
+      const data = refused ? { error: { code: "ERROR_CODE_BUDGET" } } : method === "ReadGraphSnapshot" ? {
         basis,
         terms: [{
           slug: "agent", atom: "一个主体", layer: 0, domains: ["test"],
           confidence: "confirmed", source: "personal", triggers: ["agent"],
         }],
         assertions: [],
+        padding: "a".repeat(paddingBytes),
       } : {
         basis: bodyBasis,
         key: { kind: 1, id: "1" },
@@ -30,6 +32,7 @@ function fixture(bodyBasis: typeof basis) {
       };
       const json = JSON.stringify(data);
       return new Response(json, {
+        status: refused ? 429 : 200,
         headers: { "content-type": "application/json", "content-length": String(Buffer.byteLength(json)) },
       });
     },
@@ -68,6 +71,31 @@ test("visualizer bodies must match the exact metadata basis", async () => {
     } finally {
       changed.worker.stop(true);
     }
+  }
+});
+
+test("graph reads accept production-sized batches and retain a finite reply ceiling", async () => {
+  for (const [padding, expected] of [[160 * 1024, 200], [512 * 1024, 503]] as const) {
+    const { app, worker, methods } = fixture(basis, padding);
+    try {
+      const response = await app.request("/api/meta");
+      expect(response.status).toBe(expected);
+      if (response.ok) expect(await response.json()).toMatchObject({ nodes: 1, edges: 0 });
+      expect(methods).toEqual(["ReadGraphSnapshot"]);
+    } finally {
+      worker.stop(true);
+    }
+  }
+});
+
+test("the gateway reports a resource refusal distinctly from an unavailable database", async () => {
+  const { app, worker } = fixture(basis, 0, true);
+  try {
+    const response = await app.request("/api/viz");
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Database read exceeded its resource budget" });
+  } finally {
+    worker.stop(true);
   }
 });
 

@@ -11,7 +11,7 @@ use sage_db_store::view::ImportReadiness;
 use sage_db_types::identity::KbUuid;
 use serde::Serialize;
 
-use crate::activation::{Projection, push, render_error, reserve, snapshot_error};
+use crate::activation::{Projection, push, reserve, snapshot_error};
 use crate::http::{self, Deadline, Failure};
 use crate::operator_read::{Decimal, Digest};
 
@@ -125,7 +125,7 @@ pub(crate) fn serve<F: FileSystem>(
             ledger,
         )?;
     }
-    http::respond(
+    http::respond_batch(
         socket,
         &Reply {
             basis: Basis {
@@ -139,5 +139,4 @@ pub(crate) fn serve<F: FileSystem>(
         control,
         ledger,
     )
-    .map_err(render_error)
 }

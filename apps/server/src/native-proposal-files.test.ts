@@ -18,7 +18,7 @@ function example(file: string, status: string) {
   };
 }
 
-function fixture(documentBasis = basis) {
+function fixture(documentBasis = basis, proposalMetadataPadding = 0) {
   const calls: string[] = [];
   const worker = Bun.serve({
     hostname: "127.0.0.1",
@@ -30,6 +30,8 @@ function fixture(documentBasis = basis) {
         basis,
         files: [{ path: "proposals/bodies/retained.json", status: "approved", payload: supportedBody }],
         examples: [example("example-true.md", "example"), example("example-orphan.md", "approved")],
+        nativeFiles: [],
+        padding: "a".repeat(proposalMetadataPadding),
       } : {
         text: {
           basis: documentBasis, key: { kind: 1, id: "1" }, revision: "1",
@@ -38,6 +40,14 @@ function fixture(documentBasis = basis) {
         layer: 0, domains: ["test"], confidence: "confirmed", source: "personal", triggers: ["agent"], assertions: [],
       };
       const json = JSON.stringify(response);
+      if (method === "ReadProposalFiles" && proposalMetadataPadding) {
+        const prefix = Buffer.alloc(4);
+        prefix.writeUInt32LE(Buffer.byteLength(json));
+        const payload = Buffer.concat([prefix, Buffer.from(json)]);
+        return new Response(payload, {
+          headers: { "content-type": "application/octet-stream", "content-length": String(payload.length) },
+        });
+      }
       return new Response(json, { headers: { "content-type": "application/json", "content-length": String(Buffer.byteLength(json)) } });
     },
   });
@@ -64,6 +74,19 @@ test("proposal visibility and status follow current rows; examples cannot create
     expect((await app.request("/api/proposals/owner-cannot-rename.json")).status).toBe(404);
   } finally {
     worker.stop(true);
+  }
+});
+
+test("framed proposal metadata has the same bounded batch allowance as graph replies", async () => {
+  for (const [padding, expected] of [[160 * 1024, 200], [512 * 1024, 503]] as const) {
+    const { app, worker } = fixture(basis, padding);
+    try {
+      const response = await app.request("/api/proposals");
+      expect(response.status).toBe(expected);
+      if (response.ok) expect(await response.json()).toMatchObject({ bodies: [{ file: "retained.json" }] });
+    } finally {
+      worker.stop(true);
+    }
   }
 });
 
