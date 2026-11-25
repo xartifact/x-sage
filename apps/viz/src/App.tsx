@@ -33,6 +33,7 @@ import DetailPanel from "./DetailPanel";
 import Workbench from "./Workbench";
 import { ApiError, api, fetchBuildIdentity, type BuildIdentity } from "./api";
 import { browseGraph, countDomains, domainName } from "./graph-browser";
+import { graphLabelMode, type GraphLabelMode } from "./graph-camera";
 import {
   conceptName,
   EDGE_TYPES,
@@ -46,6 +47,8 @@ import { PALETTES, validPalette, validAppearance, useTheme } from "./theme";
 import "./styles.css";
 
 type CatalogEntry = { id: string; name: string; isDefault: boolean };
+const graphLabelStorageKey = "x-sage.graph.3d-labels";
+const graphLabelOptions: Record<GraphLabelMode, string> = { auto: "自动", show: "显示", hide: "隐藏" };
 export default function App() {
   const [entries, setEntries] = useState<CatalogEntry[]>([]),
     [kb, setKb] = useState(""),
@@ -297,6 +300,18 @@ function Workspace({
   const [directoryMode, setDirectoryMode] = useState<"list" | "filters">("list");
   const [domain, setDomain] = useState("");
   const [graphMode, setGraphMode] = useState<"2d" | "3d">("2d");
+  const [labelMode, setLabelMode] = useState<GraphLabelMode>(() => {
+    try {
+      return graphLabelMode(localStorage.getItem(graphLabelStorageKey));
+    } catch {
+      return "auto";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(graphLabelStorageKey, labelMode);
+    } catch {}
+  }, [labelMode]);
   const [neighborsOf, setNeighborsOf] = useState<string | null>(null);
   const [layers, setLayers] = useState<Set<Layer>>(() => new Set(LAYERS));
   const [edges, setEdges] = useState<Set<EdgeType>>(() => new Set(EDGE_TYPES));
@@ -554,18 +569,30 @@ function Workspace({
                 <span><strong>{graph.nodes.length}</strong> 个概念</span>
                 <span><strong>{graph.edges.length}</strong> 条关系</span>
               </div>
-              <div className="sage-graph-mode" role="group" aria-label="图谱视图">
-                {(["2d", "3d"] as const).map((mode) => (
-                  <Button key={mode} variant="ghost" size="sm" aria-pressed={graphMode === mode} onClick={() => setGraphMode(mode)}>
-                    {mode.toUpperCase()}
-                  </Button>
-                ))}
+              <div className="sage-graph-settings">
+                <div className="sage-graph-mode" role="group" aria-label="图谱视图">
+                  {(["2d", "3d"] as const).map((mode) => (
+                    <Button key={mode} variant="ghost" size="sm" aria-pressed={graphMode === mode} onClick={() => setGraphMode(mode)}>
+                      {mode.toUpperCase()}
+                    </Button>
+                  ))}
+                </div>
+                {graphMode === "3d" && (
+                  <label className="sage-graph-label-setting">
+                    节点名称
+                    <select value={labelMode} onChange={(event) => setLabelMode(graphLabelMode(event.currentTarget.value))}>
+                      {Object.entries(graphLabelOptions).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </div>
             </header>
             <div className="sage-canvas">
               <ConceptGraph
-                key={graphMode}
                 mode={graphMode}
+                labelMode={labelMode}
                 nodes={graph.nodes}
                 edges={graph.edges}
                 onNodeClick={(node) => node ? select(node.id) : closeDetail()}
@@ -596,9 +623,9 @@ function Workspace({
                     {neighborsOf ? "收起关联" : "展开一跳"}
                   </Button>
                 )}
-                <span className="sage-graph-help" title="点击节点查看详情。在画布上捏合缩放。">
+                <span className="sage-graph-help" title="点击节点查看详情。聚焦画布后可用方向键操作。">
                   <CircleHelp aria-hidden="true" />
-                  {graphMode === "3d" ? "拖动旋转 · 捏合缩放" : "拖动节点 · 捏合缩放"}
+                  {graphMode === "3d" ? "拖动旋转 · 捏合缩放" : "拖动空白平移 · 捏合缩放"}
                 </span>
               </div>
             </footer>

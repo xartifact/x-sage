@@ -1,4 +1,4 @@
-import type { Layer } from "./types";
+import { conceptName, type GraphNode, type Layer } from "./types";
 
 export interface GraphCamera {
   yaw: number;
@@ -10,7 +10,35 @@ export interface GraphSize {
   height: number;
 }
 
-export const defaultGraphCamera: GraphCamera = { yaw: -0.42, pitch: 0.38 };
+export interface GraphPoint {
+  x: number;
+  y: number;
+}
+
+export interface GraphView extends GraphPoint, GraphSize {}
+
+export type GraphLabelMode = "auto" | "show" | "hide";
+
+export function graphLabelMode(value: unknown): GraphLabelMode {
+  return value === "show" || value === "hide" ? value : "auto";
+}
+
+export function graphLabel(node: GraphNode): string {
+  const title = conceptName(node).replace(/(?<=\p{Script=Han})\s+[A-Z].*$/u, "");
+  return title.length > 14 ? title.slice(0, 13) + "…" : title;
+}
+
+export function showGraphLabel(
+  mode: GraphLabelMode, layer: Layer, sparse: boolean, focused: boolean, inContext: boolean,
+): boolean {
+  return mode === "show" || (mode === "auto" && (focused || (inContext && (sparse || layer < 2))));
+}
+
+export function panGraphView(view: GraphView, dx: number, dy: number): GraphView {
+  return { ...view, x: view.x - dx, y: view.y - dy };
+}
+
+export const defaultGraphCamera: GraphCamera = { yaw: -0.48, pitch: 0.52 };
 
 export function rotateGraph(camera: GraphCamera, dx: number, dy: number): GraphCamera {
   return {
@@ -23,12 +51,12 @@ export function graphProjection({ yaw, pitch }: GraphCamera, { width, height }: 
   const sinYaw = Math.sin(yaw), cosYaw = Math.cos(yaw);
   const sinPitch = Math.sin(pitch), cosPitch = Math.cos(pitch);
   const centerX = width / 2, centerY = height / 2;
-  const eyeDistance = Math.max(width, height) * 1.6;
+  const eyeDistance = Math.max(width, height) * 1.25;
 
   return (x: number, y: number, layer: Layer) => {
     const horizontal = x - centerX;
     const groundDepth = y - centerY;
-    const level = (layer - 1.5) * Math.min(108, height * 0.19);
+    const level = (layer - 1.5) * Math.min(128, height * 0.23);
     const across = horizontal * cosYaw - groundDepth * sinYaw;
     const rotatedDepth = horizontal * sinYaw + groundDepth * cosYaw;
     const vertical = level * cosPitch - rotatedDepth * sinPitch;

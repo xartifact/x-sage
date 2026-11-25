@@ -1,10 +1,14 @@
-import { useRef, useEffect, useState, useCallback, useMemo } from "react";
-import { Button } from "@/components/ui/button";
-import { Focus, Maximize2, Minus, Plus, RotateCcw, Network } from "lucide-react";
+import { lazy, Suspense, useRef, useEffect, useState, useCallback, useMemo, useId, type ComponentType } from "react";
+import { Network } from "lucide-react";
 import * as d3 from "d3";
-import { conceptName, LAYER_COLORS, NODE_RADIUS, EDGE_COLORS } from "./types";
+import GraphMapControls from "./GraphMapControls";
+import type { ThreeGraphProps } from "./ThreeGraph";
+import { conceptName, LAYER_COLORS, LAYERS, NODE_RADIUS, EDGE_COLORS } from "./types";
 import type { GraphNode, GraphEdge, EdgeType } from "./types";
-import { defaultGraphCamera, graphProjection, rotateGraph, type GraphCamera } from "./graph-camera";
+import {
+  defaultGraphCamera, graphLabel, graphProjection, panGraphView, rotateGraph, showGraphLabel,
+  type GraphCamera, type GraphLabelMode, type GraphPoint, type GraphView, type GraphSize,
+} from "./graph-camera";
 
 interface SimulationNode extends GraphNode, d3.SimulationNodeDatum {
   id: string;
@@ -20,11 +24,21 @@ type ClientPoint = Pick<MouseEvent, "clientX" | "clientY">;
 
 interface ConceptGraphProps {
   mode: "2d" | "3d";
+  labelMode: GraphLabelMode;
   nodes: GraphNode[];
   edges: GraphEdge[];
   onNodeClick: (node: GraphNode | null) => void;
   selectedNodeId: string | null;
 }
+
+function UnavailableThreeGraph({ onUnavailable }: ThreeGraphProps) {
+  useEffect(onUnavailable, [onUnavailable]);
+  return null;
+}
+
+const ThreeGraph = lazy<ComponentType<ThreeGraphProps>>(
+  () => import("./ThreeGraph").catch(() => ({ default: UnavailableThreeGraph })),
+);
 
 function getNodeId(d: string | number | SimulationNode): string {
   if (typeof d === "string") return d;
@@ -32,8 +46,7 @@ function getNodeId(d: string | number | SimulationNode): string {
   return d.id;
 }
 
-function fittedView(points: { x: number; y: number }[]): string {
-  const padding = 96;
+function fittedView(points: GraphPoint[], padding: number): GraphView {
   let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
   for (const point of points) {
     left = Math.min(left, point.x);
@@ -41,30 +54,67 @@ function fittedView(points: { x: number; y: number }[]): string {
     right = Math.max(right, point.x);
     bottom = Math.max(bottom, point.y);
   }
-  return [left - padding, top - padding, right - left + 2 * padding, bottom - top + 2 * padding].join(" ");
+  return { x: left - padding, y: top - padding, width: right - left + 2 * padding, height: bottom - top + 2 * padding };
 }
 
-function graphLabel(node: GraphNode): string {
-  const title = conceptName(node).replace(/(?<=\p{Script=Han})\s+[A-Z].*$/u, "");
-  return title.length > 14 ? title.slice(0, 13) + "…" : title;
+function layerPlanes(nodes: SimulationNode[], project: ReturnType<typeof graphProjection>, size: GraphSize) {
+  if (!nodes.length) return [];
+  // Use the graph's footprint so the grid stays under the nodes even in filtered views.
+  const bounds = fittedView(nodes.map((node) => ({ x: node.x ?? 0, y: node.y ?? 0 })), 44);
+  const { x, y } = bounds;
+  const width = Math.max(bounds.width, size.width * 0.34);
+  const height = Math.max(bounds.height, size.height * 0.34);
+  const left = x - (width - bounds.width) / 2, top = y - (height - bounds.height) / 2;
+  return LAYERS.filter((layer) => nodes.some((node) => node.layer === layer)).map((layer) => {
+    const at = (u: number, v: number) => project(left + width * u, top + height * v, layer);
+    return {
+      layer,
+      corners: [at(0, 0), at(1, 0), at(1, 1), at(0, 1)],
+      grid: [0.25, 0.5, 0.75].flatMap((step) => [
+        [at(step, 0), at(step, 1)], [at(0, step), at(1, step)],
+      ] as const),
+    };
+  });
+}
+
+function fitGraph(nodes: SimulationNode[], dimensions: GraphSize, camera?: GraphCamera) {
+  if (!nodes.length) return null;
+  const project = camera && graphProjection(camera, dimensions);
+  const points = nodes.map((node) => {
+    const x = node.x ?? 0, y = node.y ?? 0;
+    return project ? project(x, y, node.layer) : { x, y };
+  });
+  return fittedView(project ? [...points, ...layerPlanes(nodes, project, dimensions).flatMap((plane) => plane.corners)] : points, project ? 55 : 96);
 }
 
 export default function ConceptGraph({
   mode,
+  labelMode,
   nodes,
   edges,
   onNodeClick,
   selectedNodeId,
 }: ConceptGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [threeUnavailable, setThreeUnavailable] = useState(false);
+  const showThree = mode === "3d" && !threeUnavailable;
+  const useSvgFallback = useCallback(() => setThreeUnavailable(true), []);
   const positions = useRef(new Map<string, { x: number; y: number }>());
   const viewport = useRef("");
-  const dragging = useRef<string | null>(null);
   const [camera, setCamera] = useState(defaultGraphCamera);
-  const orbit = useRef<{ id: number; x: number; y: number; initial: GraphCamera; moved: boolean } | null>(null);
+  const drag = useRef<{
+    id: number;
+    point: ClientPoint;
+    initial: GraphCamera;
+    moved: boolean;
+    node: SimulationNode | undefined;
+  } | null>(null);
+  const touchPoints = useRef(new Map<number, ClientPoint>());
+  const pinchDistance = useRef<number | null>(null);
   const suppressClick = useRef(false);
-  const [view, setView] = useState<string | null>(null);
+  const [view, setView] = useState<GraphView | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const paintId = useId();
   const simulationRef = useRef<d3.Simulation<
     SimulationNode,
     SimulationEdge
@@ -157,21 +207,6 @@ export default function ConceptGraph({
     // initial layout without waiting for D3 timer delivery.
     simulation.tick(30);
     publish();
-    const viewportKey = `${width}:${height}`;
-    if (viewport.current !== viewportKey) {
-      // A narrow canvas starts with the entire graph visible. Resize/orientation
-      // changes recalculate the fit; manual reset stays until the next resize.
-      if (mode === "3d") {
-        const project = graphProjection(defaultGraphCamera, dimensions);
-        setCamera(defaultGraphCamera);
-        setView(fittedView(simNodes.map((node) => project(node.x ?? 0, node.y ?? 0, node.layer))));
-      } else {
-        setView(width <= 640 ? fittedView(simNodes.map((node) =>
-          ({ x: node.x ?? 0, y: node.y ?? 0 }),
-        )) : null);
-      }
-      viewport.current = viewportKey;
-    }
     simulation.on("tick", publish);
 
     simulationRef.current = simulation;
@@ -179,39 +214,35 @@ export default function ConceptGraph({
     return () => {
       simulation.stop();
     };
-  }, [nodes, edges, dimensions, mode]);
+  }, [nodes, edges, dimensions]);
 
-  const startDrag = (
-    event: React.PointerEvent<SVGGElement>,
-    node: SimulationNode,
-  ) => {
-    if (event.button !== 0) return;
-    dragging.current = node.id;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    simulationRef.current?.alphaTarget(0.2).restart();
-    node.fx = node.x;
-    node.fy = node.y;
-  };
-  const moveDrag = (
-    event: React.PointerEvent<SVGGElement>,
-    node: SimulationNode,
-  ) => {
-    if (dragging.current !== node.id || !svgRef.current) return;
-    const point = d3.pointer(event, svgRef.current);
-    node.fx = point[0];
-    node.fy = point[1];
-  };
-  const endDrag = (
-    _event: React.PointerEvent<SVGGElement>,
-    node: SimulationNode,
-  ) => {
-    dragging.current = null;
-    node.fx = null;
-    node.fy = null;
-    simulationRef.current?.alphaTarget(0);
-  };
+  useEffect(() => {
+    const viewportKey = `${mode}:${dimensions.width}:${dimensions.height}`;
+    if (showThree || !simNodes.length || viewport.current === viewportKey) return;
+    setCamera(defaultGraphCamera);
+    const initialCamera = mode === "3d" ? defaultGraphCamera : undefined;
+    setView(initialCamera || dimensions.width <= 640 ? fitGraph(simNodes, dimensions, initialCamera) : null);
+    viewport.current = viewportKey;
+  }, [dimensions, mode, showThree, simNodes]);
+
+  useEffect(() => {
+    const dragged = drag.current?.node;
+    if (dragged) {
+      dragged.fx = null;
+      dragged.fy = null;
+      simulationRef.current?.alphaTarget(0);
+    }
+    drag.current = null;
+    touchPoints.current.clear();
+    pinchDistance.current = null;
+    suppressClick.current = false;
+    setHoveredNodeId(null);
+    setTooltip(null);
+  }, [mode]);
+
   const project = graphProjection(camera, dimensions);
-  const plottedNodes = simNodes.map((node) => {
+  const planes = mode === "3d" && !showThree ? layerPlanes(simNodes, project, dimensions) : [];
+  const plottedNodes = (showThree ? [] : simNodes).map((node) => {
     const x = node.x ?? 0, y = node.y ?? 0;
     return { node, ...(mode === "3d" ? project(x, y, node.layer) : { x, y, scale: 1, depth: 0 }) };
   });
@@ -220,43 +251,28 @@ export default function ConceptGraph({
   const selectedPoint = selectedNodeId ? plottedById.get(selectedNodeId) : undefined;
   const showAllLabels = mode === "3d" ? nodes.length <= 24 : dimensions.width > 460;
 
-  const startOrbit = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (mode !== "3d" || !event.isPrimary || event.button !== 0) return;
-    suppressClick.current = false;
-    orbit.current = { id: event.pointerId, x: event.clientX, y: event.clientY, initial: camera, moved: false };
-  };
-  const moveOrbit = (event: React.PointerEvent<SVGSVGElement>) => {
-    const active = orbit.current;
-    if (!active || active.id !== event.pointerId) return;
-    const dx = event.clientX - active.x, dy = event.clientY - active.y;
-    if (!active.moved) {
-      if (Math.hypot(dx, dy) < 4) return;
-      active.moved = true;
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }
-    setCamera(rotateGraph(active.initial, dx, dy));
-  };
-  const endOrbit = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (orbit.current?.id !== event.pointerId) return;
-    suppressClick.current = orbit.current.moved;
-    orbit.current = null;
-  };
-
   function resetView() {
     setCamera(defaultGraphCamera);
-    const resetProjection = graphProjection(defaultGraphCamera, dimensions);
-    setView(mode === "3d" && simNodes.length ? fittedView(simNodes.map((node) =>
-      resetProjection(node.x ?? 0, node.y ?? 0, node.layer),
-    )) : null);
+    setView(fitGraph(simNodes, dimensions, mode === "3d" ? defaultGraphCamera : undefined));
   }
 
   function focusSelection() {
     if (!selectedPoint) return;
     const width = dimensions.width * 0.6, height = dimensions.height * 0.6;
-    setView([selectedPoint.x - width / 2, selectedPoint.y - height / 2, width, height].join(" "));
+    setView({ x: selectedPoint.x - width / 2, y: selectedPoint.y - height / 2, width, height });
   }
 
-  const defaultView = `0 0 ${dimensions.width} ${dimensions.height}`;
+  const defaultView = useMemo(() => ({ x: 0, y: 0, ...dimensions }), [dimensions]);
+  const currentView = view ?? defaultView;
+  const screenDelta = useCallback((dx: number, dy: number) => {
+    const matrix = svgRef.current?.getScreenCTM()?.inverse();
+    // A delta transforms as a vector: omit matrix translation.
+    return matrix ? { x: matrix.a * dx + matrix.c * dy, y: matrix.b * dx + matrix.d * dy } : { x: dx, y: dy };
+  }, []);
+  const pan = useCallback((dx: number, dy: number) => {
+    const offset = screenDelta(dx, dy);
+    setView((previous) => panGraphView(previous ?? defaultView, offset.x, offset.y));
+  }, [defaultView, screenDelta]);
   const zoom = useCallback((factor: number, point?: ClientPoint) => {
     const svg = svgRef.current;
     let anchorX = 0.5;
@@ -271,14 +287,93 @@ export default function ConceptGraph({
       }
     }
     setView((previous) => {
-      const [x = 0, y = 0, width = dimensions.width, height = dimensions.height] =
-        (previous ?? defaultView).split(" ").map(Number);
+      const { x, y, width, height } = previous ?? defaultView;
       const nextWidth = Math.min(dimensions.width * 12, Math.max(dimensions.width / 6, width * factor));
       if (nextWidth === width) return previous;
       const nextHeight = height * (nextWidth / width);
-      return [x + (width - nextWidth) * anchorX, y + (height - nextHeight) * anchorY, nextWidth, nextHeight].join(" ");
+      return { x: x + (width - nextWidth) * anchorX, y: y + (height - nextHeight) * anchorY,
+        width: nextWidth, height: nextHeight };
     });
   }, [defaultView, dimensions]);
+
+  function finishDrag() {
+    const active = drag.current;
+    if (active?.moved && active.node) {
+      active.node.fx = null;
+      active.node.fy = null;
+      simulationRef.current?.alphaTarget(0);
+    }
+    drag.current = null;
+  }
+
+  function measurePinch() {
+    const [first, second] = touchPoints.current.values();
+    if (!first || !second) return null;
+    return {
+      distance: Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY),
+      anchor: { clientX: (first.clientX + second.clientX) / 2, clientY: (first.clientY + second.clientY) / 2 },
+    };
+  }
+
+  function startPointer(event: React.PointerEvent<SVGSVGElement>) {
+    if (!simNodes.length || event.button !== 0) return;
+    const point = { clientX: event.clientX, clientY: event.clientY };
+    if (event.pointerType === "touch") {
+      touchPoints.current.set(event.pointerId, point);
+      if (touchPoints.current.size > 1) {
+        finishDrag();
+        suppressClick.current = true;
+        for (const id of touchPoints.current.keys()) event.currentTarget.setPointerCapture(id);
+        if (touchPoints.current.size === 2) pinchDistance.current = measurePinch()?.distance ?? null;
+        return;
+      }
+    }
+    if (!event.isPrimary) return;
+    const target = event.target instanceof Element && event.target.closest<SVGGElement>("[data-graph-node]");
+    const node = mode === "2d" && target ? plottedById.get(target.dataset.graphNode ?? "")?.node : undefined;
+    suppressClick.current = false;
+    drag.current = { id: event.pointerId, point, initial: camera, moved: false, node };
+  }
+
+  function movePointer(event: React.PointerEvent<SVGSVGElement>) {
+    const point = { clientX: event.clientX, clientY: event.clientY };
+    if (touchPoints.current.has(event.pointerId)) {
+      touchPoints.current.set(event.pointerId, point);
+      const pinch = measurePinch();
+      if (pinch) {
+        if (pinch.distance > 0 && pinchDistance.current) zoom(pinchDistance.current / pinch.distance, pinch.anchor);
+        pinchDistance.current = pinch.distance;
+        return;
+      }
+    }
+    const active = drag.current;
+    if (!active || active.id !== event.pointerId) return;
+    const dx = point.clientX - active.point.clientX, dy = point.clientY - active.point.clientY;
+    if (!active.moved) {
+      if (Math.hypot(dx, dy) < 4) return;
+      active.moved = true;
+      suppressClick.current = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      if (active.node) simulationRef.current?.alphaTarget(0.2).restart();
+    }
+    if (mode === "3d") {
+      setCamera(rotateGraph(active.initial, dx, dy));
+      return;
+    }
+    if (active.node) {
+      const offset = screenDelta(dx, dy);
+      active.node.fx = (active.node.fx ?? active.node.x ?? 0) + offset.x;
+      active.node.fy = (active.node.fy ?? active.node.y ?? 0) + offset.y;
+    } else {
+      pan(dx, dy);
+    }
+    active.point = point;
+  }
+
+  function endPointer(event: React.PointerEvent<SVGSVGElement>) {
+    if (touchPoints.current.delete(event.pointerId)) pinchDistance.current = measurePinch()?.distance ?? null;
+    if (drag.current?.id === event.pointerId) finishDrag();
+  }
 
   const hasGraph = simNodes.length > 0;
   useEffect(() => {
@@ -291,11 +386,18 @@ export default function ConceptGraph({
     const clearPointer = () => { pointer = undefined; };
 
     const wheel = (event: WheelEvent) => {
-      if (!event.ctrlKey) return;
-      const { deltaMode, deltaY } = event;
+      const { deltaMode, deltaX, deltaY } = event;
+      if (!event.ctrlKey) {
+        if (mode !== "2d" || event.metaKey || (!deltaX && !deltaY)) return;
+        event.preventDefault();
+        const unit = deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
+          : deltaMode === WheelEvent.DOM_DELTA_PAGE ? svg.clientHeight : 1;
+        pan(-deltaX * unit, -deltaY * unit);
+        return;
+      }
       if (deltaY === 0) return;
       event.preventDefault();
-      if (gesture) return;
+      if (gesture || touchPoints.current.size > 1) return;
       const step = deltaMode === WheelEvent.DOM_DELTA_LINE ? 0.5
         : deltaMode === WheelEvent.DOM_DELTA_PAGE ? 10 : 0.02;
       zoom(2 ** (deltaY * step), event);
@@ -316,6 +418,7 @@ export default function ConceptGraph({
     const changeGesture = (event: Event) => {
       if (!gesture) return;
       event.preventDefault();
+      if (touchPoints.current.size > 1) return;
       const { scale } = event as Event & { scale: number };
       if (!Number.isFinite(scale) || scale <= 0) return;
       zoom(gesture.scale / scale, gesture.anchor);
@@ -342,13 +445,13 @@ export default function ConceptGraph({
       doc.removeEventListener("gesturechange", changeGesture);
       doc.removeEventListener("gestureend", endGesture);
     };
-  }, [hasGraph, zoom]);
+  }, [hasGraph, mode, pan, showThree, zoom]);
 
   const highlightedNodeId = hoveredNodeId ?? selectedNodeId;
 
   // Keep a selected concept and its connections in context after the pointer leaves.
   const neighborSet = useMemo(() => {
-    if (!highlightedNodeId) return new Set<string>();
+    if (showThree || !highlightedNodeId) return new Set<string>();
     const neighbors = new Set<string>([highlightedNodeId]);
     simEdges.forEach((e) => {
       const src = getNodeId(e.source);
@@ -357,10 +460,10 @@ export default function ConceptGraph({
       if (tgt === highlightedNodeId) neighbors.add(src);
     });
     return neighbors;
-  }, [highlightedNodeId, simEdges]);
+  }, [highlightedNodeId, showThree, simEdges]);
 
   const edgeHighlighted = useMemo(() => {
-    if (!highlightedNodeId) return new Set<number>();
+    if (showThree || !highlightedNodeId) return new Set<number>();
     const highlighted = new Set<number>();
     simEdges.forEach((e, idx) => {
       const src = getNodeId(e.source);
@@ -370,7 +473,7 @@ export default function ConceptGraph({
       }
     });
     return highlighted;
-  }, [highlightedNodeId, simEdges]);
+  }, [highlightedNodeId, showThree, simEdges]);
 
   const handleSvgClick = useCallback(
     (e: React.MouseEvent) => {
@@ -398,48 +501,41 @@ export default function ConceptGraph({
     setTooltip(null);
   }, []);
 
+  if (showThree && nodes.length) {
+    return (
+      <div ref={containerRef} className="sage-graph-canvas" data-mode={mode}>
+        <Suspense fallback={<div className="sage-graph-status" role="status">正在加载三维图谱…</div>}>
+          <ThreeGraph
+            nodes={simNodes}
+            edges={edges}
+            size={dimensions}
+            labelMode={labelMode}
+            selectedNodeId={selectedNodeId}
+            onNodeClick={onNodeClick}
+            onUnavailable={useSvgFallback}
+          />
+        </Suspense>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={containerRef}
       className="sage-graph-canvas"
+      data-mode={mode}
     >
-      <div className="sage-map-controls">
-        <Button variant="ghost" size="icon" onClick={() => zoom(0.8)} disabled={!simNodes.length}
-          aria-label="放大图谱" title="放大图谱"><Plus className="size-4" /></Button>
-        <Button variant="ghost" size="icon" onClick={() => zoom(1.25)} disabled={!simNodes.length}
-          aria-label="缩小图谱" title="缩小图谱"><Minus className="size-4" /></Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setView(fittedView(plottedNodes))}
-          disabled={simNodes.length === 0}
-          aria-label="适应全部节点"
-          title="适应全部节点"
-        >
-          <Maximize2 className="size-4" />
-        </Button>
-        {mode === "3d" && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={focusSelection}
-            disabled={!selectedPoint}
-            aria-label="定位所选概念"
-            title="定位所选概念"
-          >
-            <Focus className="size-4" />
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={resetView}
-          aria-label="重置视图"
-          title="重置视图"
-        >
-          <RotateCcw className="size-4" />
-        </Button>
-      </div>
+      <GraphMapControls
+        hasNodes={hasGraph}
+        zoom={zoom}
+        fit={() => setView(fitGraph(simNodes, dimensions, mode === "3d" ? camera : undefined))}
+        focus={mode === "3d" ? focusSelection : undefined}
+        hasSelection={!!selectedPoint}
+        reset={resetView}
+      />
+      {mode === "3d" && threeUnavailable && (
+        <span className="sage-graph-fallback" role="status">使用兼容渲染</span>
+      )}
       {nodes.length === 0 && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center text-muted-foreground">
           <Network className="size-8" />
@@ -451,15 +547,17 @@ export default function ConceptGraph({
         ref={svgRef}
         className="graph-svg h-full w-full touch-none"
         aria-label={mode === "3d" ? "三维知识概念关系图" : "知识概念关系图"}
-        tabIndex={mode === "3d" ? 0 : undefined}
-        viewBox={view ?? defaultView}
-        onPointerDown={startOrbit}
-        onPointerMove={moveOrbit}
-        onPointerUp={endOrbit}
-        onPointerCancel={endOrbit}
-        onLostPointerCapture={endOrbit}
+        tabIndex={0}
+        viewBox={`${currentView.x} ${currentView.y} ${currentView.width} ${currentView.height}`}
+        onPointerDown={startPointer}
+        onPointerMove={movePointer}
+        onPointerUp={endPointer}
+        onPointerCancel={endPointer}
+        onLostPointerCapture={(event) => {
+          if (event.target === event.currentTarget) endPointer(event);
+        }}
         onPointerLeave={() => {
-          if (orbit.current && !orbit.current.moved) orbit.current = null;
+          if (drag.current && !drag.current.moved && !touchPoints.current.size) finishDrag();
         }}
         onClickCapture={(event) => {
           if (event.detail > 0 && suppressClick.current) {
@@ -469,12 +567,13 @@ export default function ConceptGraph({
         }}
         onClick={handleSvgClick}
         onKeyDown={(event) => {
-          if (mode !== "3d") return;
-          const dx = event.key === "ArrowLeft" ? -20 : event.key === "ArrowRight" ? 20 : 0;
-          const dy = event.key === "ArrowUp" ? -20 : event.key === "ArrowDown" ? 20 : 0;
+          if (!hasGraph) return;
+          const dx = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+          const dy = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
           if (dx || dy) {
             event.preventDefault();
-            setCamera((previous) => rotateGraph(previous, dx, dy));
+            if (mode === "3d") setCamera((previous) => rotateGraph(previous, dx * 20, dy * 20));
+            else pan(dx * 44, dy * 44);
           }
         }}
       >
@@ -483,7 +582,7 @@ export default function ConceptGraph({
           {Object.entries(EDGE_COLORS).map(([type, color]) => (
             <marker
               key={type}
-              id={`arrow-${type}`}
+              id={`${paintId}-arrow-${type}`}
               viewBox="0 -5 10 10"
               refX={9}
               refY={0}
@@ -498,32 +597,50 @@ export default function ConceptGraph({
               <path d="M0,-5L10,0L0,5" fill={color} />
             </marker>
           ))}
+          {mode === "3d" && LAYERS.map((layer) => (
+            <radialGradient key={layer} id={`${paintId}-node-${layer}`} cx="33%" cy="27%" r="73%" color={LAYER_COLORS[layer]}>
+              <stop offset="0" className="sage-node-light" />
+              <stop offset="0.55" stopColor="currentColor" />
+              <stop offset="1" className="sage-node-shade" />
+            </radialGradient>
+          ))}
         </defs>
 
-        {mode === "3d" && (
+        {planes.length > 0 && (
           <g aria-hidden="true" pointerEvents="none">
-            {[...new Set(nodes.map((node) => node.layer))].map((layer) => {
-              const corners = [[0.2, 0.23], [0.8, 0.23], [0.8, 0.77], [0.2, 0.77]] as const;
-              const points = corners.map(([x, y]) => {
-                const point = project(x * dimensions.width, y * dimensions.height, layer);
-                return `${point.x},${point.y}`;
-              }).join(" ");
-              return <polygon key={layer} className="sage-layer-plane" points={points} />;
+            {planes.length > 1 && planes[0]!.corners.map((from, index) => {
+              const to = planes[planes.length - 1]!.corners[index]!;
+              return <line key={index} className="sage-layer-guide" x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
+            })}
+            {planes.map(({ layer, corners, grid }) => {
+              const label = corners.reduce((left, point) => point.x < left.x ? point : left);
+              return (
+                <g key={layer} color={LAYER_COLORS[layer]}>
+                  <polygon className="sage-layer-plane" points={corners.map(({ x, y }) => `${x},${y}`).join(" ")} />
+                  {grid.map(([from, to], index) => (
+                    <line key={index} className="sage-layer-grid" x1={from.x} y1={from.y} x2={to.x} y2={to.y} />
+                  ))}
+                  <text className="sage-layer-index" x={label.x - 8} y={label.y + 4}>L{layer}</text>
+                </g>
+              );
             })}
           </g>
         )}
 
         {/* Edges */}
-        <g>
-          {simEdges.map((edge, idx) => {
+        <g pointerEvents="none">
+          {simEdges.map((edge, idx) => ({ edge, idx })).sort((a, b) =>
+            Number(edgeHighlighted.has(a.idx)) - Number(edgeHighlighted.has(b.idx)),
+          ).map(({ edge, idx }) => {
             const srcCoords = plottedById.get(getNodeId(edge.source));
             const tgtCoords = plottedById.get(getNodeId(edge.target));
             if (!srcCoords || !tgtCoords) return null;
 
             const isHighlighted = edgeHighlighted.has(idx);
             const isDimmed = highlightedNodeId && !isHighlighted;
-            const opacity = isDimmed ? 0.12 : isHighlighted ? 1.0 : 0.50;
-            const strokeWidth = isHighlighted ? 2.25 : 1.25;
+            const depthScale = Math.max(0.65, Math.min(1.25, (srcCoords.scale + tgtCoords.scale) / 2));
+            const opacity = isDimmed ? 0.10 : isHighlighted ? 1 : 0.47 * depthScale;
+            const strokeWidth = isHighlighted ? 2.25 : 1.25 * depthScale;
             const dx = tgtCoords.x - srcCoords.x;
             const dy = tgtCoords.y - srcCoords.y;
             const targetRadius = NODE_RADIUS[tgtCoords.node.layer] * 0.54 * tgtCoords.scale;
@@ -548,7 +665,7 @@ export default function ConceptGraph({
                       ? "2,4"
                       : undefined
                 }
-                markerEnd={`url(#arrow-${edge.type})`}
+                markerEnd={`url(#${paintId}-arrow-${edge.type})`}
               />
             );
           })}
@@ -562,15 +679,15 @@ export default function ConceptGraph({
             const isSelected = selectedNodeId === node.id;
             const isDimmed = highlightedNodeId && !isNeighbor;
             const opacity = isDimmed ? 0.3 : 1.0;
-            const showLabel = isHovered || isSelected || (!isDimmed && (showAllLabels || node.layer < 2));
+            const showLabel = showGraphLabel(mode === "2d" ? "auto" : labelMode,
+              node.layer, showAllLabels, isHovered || isSelected, !isDimmed);
             const radius = NODE_RADIUS[node.layer] * 0.54 * scale;
 
             return (
               <g
                 key={node.id}
+                data-graph-node={node.id}
                 transform={`translate(${x}, ${y})`}
-                opacity={opacity}
-                style={{ transition: "opacity 150ms ease" }}
                 onMouseEnter={(e) => handleNodeHover(node, e)}
                 onMouseLeave={handleNodeLeave}
                 role="button"
@@ -586,27 +703,22 @@ export default function ConceptGraph({
                 }}
                 onFocus={() => setHoveredNodeId(node.id)}
                 onBlur={handleNodeLeave}
-                onPointerDown={mode === "2d" ? (e) => startDrag(e, node) : undefined}
-                onPointerMove={mode === "2d" ? (e) => moveDrag(e, node) : undefined}
-                onPointerUp={mode === "2d" ? (e) => endDrag(e, node) : undefined}
-                onPointerCancel={mode === "2d" ? (e) => endDrag(e, node) : undefined}
                 onClick={(e) => {
                   e.stopPropagation();
                   onNodeClick(node);
                 }}
               >
-                <circle
-                  className="sage-node-halo"
-                  r={radius + 5}
-                  fill={LAYER_COLORS[node.layer]}
-                  opacity={isSelected ? 0.32 : isHovered ? 0.24 : 0.13}
-                />
-                <circle
-                  className="node-circle"
-                  r={radius}
-                  fill={LAYER_COLORS[node.layer]}
-                />
-                {showLabel && <text className="node-label" y={radius + 15}>{graphLabel(node)}</text>}
+                <g className="sage-node-glyph" opacity={opacity}>
+                  <circle className="sage-node-halo" r={radius + (isSelected ? 8 : 5)}
+                    fill={LAYER_COLORS[node.layer]} opacity={isSelected ? 0.32 : isHovered ? 0.24 : 0.12} />
+                  <circle className="node-circle" r={radius}
+                    fill={mode === "3d" ? `url(#${paintId}-node-${node.layer})` : LAYER_COLORS[node.layer]} />
+                </g>
+                {showLabel && (
+                  <text className="node-label" y={radius + 13} opacity={isDimmed ? 0.85 : 1}>
+                    {graphLabel(node)}
+                  </text>
+                )}
               </g>
             );
           })}
