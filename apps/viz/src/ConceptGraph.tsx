@@ -25,6 +25,9 @@ type ClientPoint = Pick<MouseEvent, "clientX" | "clientY">;
 interface ConceptGraphProps {
   mode: "2d" | "3d";
   labelMode: GraphLabelMode;
+  fallingNodes: ReadonlySet<string> | null;
+  threeUnavailable: boolean;
+  onThreeUnavailable: (unavailable: boolean) => void;
   nodes: GraphNode[];
   edges: GraphEdge[];
   onNodeClick: (node: GraphNode | null) => void;
@@ -90,15 +93,17 @@ function fitGraph(nodes: SimulationNode[], dimensions: GraphSize, camera?: Graph
 export default function ConceptGraph({
   mode,
   labelMode,
+  fallingNodes,
+  threeUnavailable,
+  onThreeUnavailable,
   nodes,
   edges,
   onNodeClick,
   selectedNodeId,
 }: ConceptGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [threeUnavailable, setThreeUnavailable] = useState(false);
   const showThree = mode === "3d" && !threeUnavailable;
-  const useSvgFallback = useCallback(() => setThreeUnavailable(true), []);
+  const useSvgFallback = useCallback(() => onThreeUnavailable(true), [onThreeUnavailable]);
   const positions = useRef(new Map<string, { x: number; y: number }>());
   const viewport = useRef("");
   const [camera, setCamera] = useState(defaultGraphCamera);
@@ -510,6 +515,7 @@ export default function ConceptGraph({
             edges={edges}
             size={dimensions}
             labelMode={labelMode}
+            fallingNodes={fallingNodes}
             selectedNodeId={selectedNodeId}
             onNodeClick={onNodeClick}
             onUnavailable={useSvgFallback}
@@ -534,7 +540,7 @@ export default function ConceptGraph({
         reset={resetView}
       />
       {mode === "3d" && threeUnavailable && (
-        <span className="sage-graph-fallback" role="status">使用兼容渲染</span>
+        <span className="sage-graph-fallback" role="status">使用兼容渲染 · 物理模拟需 WebGL 2</span>
       )}
       {nodes.length === 0 && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center text-muted-foreground">

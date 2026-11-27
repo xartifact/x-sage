@@ -1,9 +1,20 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { fallingHeight, graphLandingHeight, graphLayerGap, graphLayerHeight } from "./graph-gravity";
 import { EDGE_COLORS, LAYER_COLORS, LAYERS, NODE_RADIUS, type GraphEdge, type GraphNode, type Layer } from "./types";
 import type { GraphSize } from "./graph-camera";
 
 export type LayoutNode = GraphNode & { x?: number | undefined; y?: number | undefined };
+
+interface SceneLayout {
+  nodes: LayoutNode[];
+  edges: GraphEdge[];
+  size: GraphSize;
+  selected: string | null;
+  highlight: string | null;
+  neighbors: ReadonlySet<string>;
+  fallingNodes: ReadonlySet<string> | null;
+}
 
 class EdgeLines {
   readonly geometry = new THREE.BufferGeometry();
@@ -56,6 +67,9 @@ export class ThreeGraphScene {
   private readonly arrowMaterial = new THREE.MeshBasicMaterial();
   private readonly plane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
   private readonly grid = new THREE.BufferGeometry();
+  private readonly landing = new THREE.Mesh(this.plane, new THREE.MeshBasicMaterial({
+    opacity: 0.10, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  }));
   private readonly planes = LAYERS.map((layer) => {
     const surface = new THREE.Mesh(this.plane, new THREE.MeshBasicMaterial({
       color: LAYER_COLORS[layer], opacity: 0.10, transparent: true, depthWrite: false, side: THREE.DoubleSide,
@@ -76,6 +90,8 @@ export class ThreeGraphScene {
     new THREE.MeshBasicMaterial({ color: 0xb1a1ff, side: THREE.DoubleSide }),
   );
   private readonly world = new Map<string, THREE.Vector3>();
+  private readonly fallingSince = new Map<string, number>();
+  private readonly reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   private readonly radii = new Map<string, number>();
   private readonly bounds = new THREE.Box3();
   private readonly focusBounds = new THREE.Box3();
@@ -92,7 +108,11 @@ export class ThreeGraphScene {
   private readonly edgeEnd = new THREE.Vector3();
   private readonly darkColor = new THREE.Color(0x637083);
   private readonly defaultDirection = new THREE.Vector3(0.70, 0.66, 1).normalize();
-  private nodes: LayoutNode[] = [];
+  private layout?: SceneLayout;
+  private drawnNodes: LayoutNode[] = [];
+  private dirty = false;
+  private falling = false;
+  private fitOnNextDraw = false;
   private mesh: THREE.InstancedMesh;
   private arrows: THREE.InstancedMesh;
   private normal: EdgeLines;
@@ -123,6 +143,9 @@ export class ThreeGraphScene {
     key.position.set(-280, 420, 340);
     this.scene.add(new THREE.HemisphereLight(0xf4f4ff, 0x717892, 1.8), key, this.selection);
     this.selection.visible = false;
+    this.landing.visible = false;
+    this.landing.renderOrder = -2;
+    this.scene.add(this.landing);
     this.mesh = this.instances(this.sphere, this.nodeMaterial, this.nodeCapacity);
     this.arrows = this.instances(this.cone, this.arrowMaterial, this.edgeCapacity);
     [this.normal, this.emphasis] = this.edgeLines();
@@ -169,27 +192,46 @@ export class ThreeGraphScene {
     }
   }
 
-  updateLayout(
-    nodes: LayoutNode[], edges: GraphEdge[], size: GraphSize,
-    selected: string | null, highlight: string | null, neighbors: ReadonlySet<string>,
-  ) {
+  updateLayout(layout: SceneLayout) {
+    if (!layout.fallingNodes) this.fallingSince.clear();
+    if (layout.fallingNodes && !this.layout?.fallingNodes) this.fitOnNextDraw = true;
+    this.layout = layout;
+    this.dirty = true;
+    this.requestFrame();
+  }
+
+  private drawLayout(layout: SceneLayout, now: number) {
+    const { nodes, edges, size, selected, highlight, neighbors, fallingNodes } = layout;
     this.resize(size);
     this.grow(nodes.length, edges.length);
-    this.nodes = nodes;
+    this.drawnNodes = nodes;
     this.bounds.makeEmpty();
-    // D3's horizontal coordinates become the ground plane. Higher-level concepts sit above it.
-    const gap = Math.min(128, size.height * 0.23);
-    const layers = new Set<number>();
+    this.falling = false;
+    // D3's two axes determine the horizontal footprint. Gravity only changes world Y.
+    const gap = graphLayerGap(size.height);
+    const floor = graphLandingHeight(gap);
+    const layers = new Set<Layer>();
     const live = new Set<string>();
     for (const [index, node] of nodes.entries()) {
       const point = this.world.get(node.id) ?? new THREE.Vector3();
-      point.set((node.x ?? size.width / 2) - size.width / 2, (1.5 - node.layer) * gap,
+      const radius = NODE_RADIUS[node.layer] * 0.54;
+      const restHeight = graphLayerHeight(node.layer, gap);
+      let y = restHeight;
+      if (fallingNodes?.has(node.id)) {
+        const started = this.fallingSince.get(node.id) ?? now;
+        this.fallingSince.set(node.id, started);
+        const landing = floor + radius;
+        y = this.reducedMotion.matches ? landing : fallingHeight(restHeight, landing, now - started);
+        if (y > landing) this.falling = true;
+      } else {
+        this.fallingSince.delete(node.id);
+      }
+      point.set((node.x ?? size.width / 2) - size.width / 2, y,
         (node.y ?? size.height / 2) - size.height / 2);
       this.world.set(node.id, point);
       live.add(node.id);
       layers.add(node.layer);
       this.bounds.expandByPoint(point);
-      const radius = NODE_RADIUS[node.layer] * 0.54;
       this.radii.set(node.id, radius);
       this.transform.position.copy(point);
       this.transform.quaternion.identity();
@@ -204,6 +246,7 @@ export class ThreeGraphScene {
       if (!live.has(id)) {
         this.world.delete(id);
         this.radii.delete(id);
+        this.fallingSince.delete(id);
       }
     }
     this.mesh.count = nodes.length;
@@ -217,13 +260,13 @@ export class ThreeGraphScene {
       this.selection.position.copy(selectedPoint);
       this.selection.scale.setScalar(NODE_RADIUS[selectedNode.layer] * 0.54);
     }
-    this.updatePlanes(gap, layers);
+    this.updatePlanes(gap, layers, this.fallingSince.size ? floor : null);
     this.updateEdges(edges, highlight);
-    if (!this.fitted && nodes.length) {
+    if (nodes.length && (!this.fitted || this.fitOnNextDraw)) {
+      this.fit(!this.fitted);
       this.fitted = true;
-      this.fit(true);
+      this.fitOnNextDraw = false;
     }
-    this.requestFrame();
   }
 
   private resize(size: GraphSize) {
@@ -235,21 +278,33 @@ export class ThreeGraphScene {
     this.camera.updateProjectionMatrix();
   }
 
-  private updatePlanes(gap: number, layers: Set<number>) {
+  private updatePlanes(gap: number, layers: Set<Layer>, floor: number | null) {
     const center = this.bounds.getCenter(this.projected);
     const width = Math.max(160, this.bounds.max.x - this.bounds.min.x + 86);
     const depth = Math.max(140, this.bounds.max.z - this.bounds.min.z + 86);
-    this.planes.forEach((plane, layer) => {
+    for (const layer of LAYERS) {
+      const plane = this.planes[layer]!;
       plane.visible = layers.has(layer);
-      if (!plane.visible) return;
-      plane.position.set(center.x, (1.5 - layer) * gap - 15, center.z);
+      if (!plane.visible) continue;
+      plane.position.set(center.x, graphLayerHeight(layer, gap) - 15, center.z);
       plane.scale.set(width, 1, depth);
-    });
+    }
+    this.landing.visible = floor !== null;
+    if (floor !== null) {
+      this.landing.position.set(center.x, floor, center.z);
+      this.landing.scale.set(width, 1, depth);
+    }
     this.focusBounds.copy(this.bounds);
     if (layers.size) this.focusBounds.expandByVector(this.direction.set(
       (width - (this.bounds.max.x - this.bounds.min.x)) / 2, 30,
       (depth - (this.bounds.max.z - this.bounds.min.z)) / 2,
     ));
+    for (const layer of layers) {
+      const y = graphLayerHeight(layer, gap);
+      this.focusBounds.max.y = Math.max(this.focusBounds.max.y, y + 15);
+      this.focusBounds.min.y = Math.min(this.focusBounds.min.y, y - 15);
+    }
+    if (floor !== null) this.focusBounds.min.y = Math.min(this.focusBounds.min.y, floor - 12);
   }
 
   private updateEdges(edges: GraphEdge[], highlight: string | null) {
@@ -289,12 +344,12 @@ export class ThreeGraphScene {
   }
 
   pick(x: number, y: number): LayoutNode | null {
-    if (!this.nodes.length) return null;
+    if (!this.drawnNodes.length) return null;
     this.camera.updateMatrixWorld();
     this.mesh.updateMatrixWorld();
     this.ray.setFromCamera(this.cursor.set(x * 2 - 1, 1 - y * 2), this.camera);
     const instance = this.ray.intersectObject(this.mesh, false)[0]?.instanceId;
-    return instance === undefined ? null : this.nodes[instance] ?? null;
+    return instance === undefined ? null : this.drawnNodes[instance] ?? null;
   }
 
   private project(point: THREE.Vector3) {
@@ -316,15 +371,23 @@ export class ThreeGraphScene {
   }
 
   projectLayer(layer: Layer) {
-    const plane = this.planes[layer];
+    return this.projectPlane(this.planes[layer]);
+  }
+
+  projectLanding() {
+    return this.projectPlane(this.landing);
+  }
+
+  private projectPlane(plane?: THREE.Object3D) {
     if (!plane?.visible) return null;
     return this.project(this.labelPoint.copy(plane.position).add(
       this.direction.set(-plane.scale.x / 2, 0, plane.scale.z / 2),
     ));
   }
 
-  setSelectionColor(cssColor: string) {
-    if (cssColor) this.selection.material.color.setStyle(cssColor);
+  setThemeColors(selectionColor: string, landingColor: string) {
+    if (selectionColor) this.selection.material.color.setStyle(selectionColor);
+    if (landingColor) this.landing.material.color.setStyle(landingColor);
     this.requestFrame();
   }
 
@@ -376,11 +439,16 @@ export class ThreeGraphScene {
 
   requestFrame = () => {
     if (this.disposed || this.frame) return;
-    this.frame = requestAnimationFrame(() => {
+    this.frame = requestAnimationFrame((now) => {
       this.frame = 0;
+      if (this.layout && (this.dirty || this.falling)) {
+        this.dirty = false;
+        this.drawLayout(this.layout, now);
+      }
       this.selection.quaternion.copy(this.camera.quaternion);
       this.renderer.render(this.scene, this.camera);
       this.onDraw();
+      if (this.falling) this.requestFrame();
     });
   };
 
@@ -398,6 +466,7 @@ export class ThreeGraphScene {
     this.cone.dispose();
     this.grid.dispose();
     this.plane.dispose();
+    this.landing.material.dispose();
     this.selection.geometry.dispose();
     this.selection.material.dispose();
     for (const plane of this.planes) {

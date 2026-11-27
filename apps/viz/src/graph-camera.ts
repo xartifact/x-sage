@@ -1,4 +1,5 @@
 import { conceptName, type GraphNode, type Layer } from "./types";
+import { graphLayerGap, graphLayerHeight } from "./graph-gravity";
 
 export interface GraphCamera {
   yaw: number;
@@ -52,11 +53,12 @@ export function graphProjection({ yaw, pitch }: GraphCamera, { width, height }: 
   const sinPitch = Math.sin(pitch), cosPitch = Math.cos(pitch);
   const centerX = width / 2, centerY = height / 2;
   const eyeDistance = Math.max(width, height) * 1.25;
+  const gap = graphLayerGap(height);
 
   return (x: number, y: number, layer: Layer) => {
     const horizontal = x - centerX;
     const groundDepth = y - centerY;
-    const level = (layer - 1.5) * Math.min(128, height * 0.23);
+    const level = -graphLayerHeight(layer, gap);
     const across = horizontal * cosYaw - groundDepth * sinYaw;
     const rotatedDepth = horizontal * sinYaw + groundDepth * cosYaw;
     const vertical = level * cosPitch - rotatedDepth * sinPitch;

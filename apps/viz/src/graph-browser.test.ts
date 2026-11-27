@@ -59,7 +59,7 @@ describe("domain browsing", () => {
 test("the 3D camera separates layers vertically and changes perspective when rotated", () => {
   const size = { width: 750, height: 500 };
   const project = graphProjection(defaultGraphCamera, size);
-  expect(project(375, 250, 0).y).toBeLessThan(project(375, 250, 3).y);
+  expect(project(375, 250, 0).y).toBeGreaterThan(project(375, 250, 3).y);
   const point = project(450, 275, 1);
   const rotated = graphProjection(rotateGraph(defaultGraphCamera, 50, -25), size)(450, 275, 1);
   expect(rotated.x).not.toBeCloseTo(point.x);

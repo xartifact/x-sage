@@ -240,6 +240,8 @@
   background: var(--xa-surface);
 }
 .sage-graph-label-setting select:focus-visible { outline: 2px solid var(--xa-brand); outline-offset: 2px; }
+.sage-graph-gravity { min-height: 34px; }
+.sage-graph-gravity[aria-checked="true"] { border-color: var(--xa-brand-border); background: var(--xa-brand-soft); color: var(--xa-brand); }
 .sage-layer-plane {
   fill: color-mix(in srgb, currentColor 9%, transparent);
   stroke: color-mix(in srgb, currentColor 38%, var(--xa-border));
@@ -455,7 +457,7 @@
   .sage-detail-header button { min-width: 44px; }
   .sage-canvas { min-height: max(310px, 48dvh); }
   .sage-graph-header, .sage-graph-footer { padding-inline: 11px; }
-  .sage-graph-label-setting select { min-height: 44px; }
+  .sage-graph-label-setting select, .sage-graph-gravity { min-height: 44px; }
   .sage-map-controls > button { min-height: 44px; min-width: 44px; }
   .sage-maintenance[data-slot="dialog-content"] { width: calc(100% - 18px); max-height: 95dvh; }
   .sage-maintenance-header { padding-left: 14px; text-align: left; }

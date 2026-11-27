@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import GraphMapControls from "./GraphMapControls";
-import { graphLabel, showGraphLabel, type GraphLabelMode, type GraphSize } from "./graph-camera";
+import { graphLabel, showGraphLabel, type GraphLabelMode, type GraphPoint, type GraphSize } from "./graph-camera";
 import { ThreeGraphScene, type LayoutNode } from "./three-graph-scene";
 import { conceptName, LAYERS, type GraphEdge, type GraphNode, type Layer } from "./types";
 
@@ -9,6 +9,7 @@ export interface ThreeGraphProps {
   edges: GraphEdge[];
   size: GraphSize;
   labelMode: GraphLabelMode;
+  fallingNodes: ReadonlySet<string> | null;
   selectedNodeId: string | null;
   onNodeClick: (node: GraphNode | null) => void;
   onUnavailable: () => void;
@@ -17,12 +18,13 @@ export interface ThreeGraphProps {
 const clickTolerance = 6;
 
 export default function ThreeGraph({
-  nodes, edges, size, labelMode, selectedNodeId, onNodeClick, onUnavailable,
+  nodes, edges, size, labelMode, fallingNodes, selectedNodeId, onNodeClick, onUnavailable,
 }: ThreeGraphProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const scene = useRef<ThreeGraphScene>(null);
   const labels = useRef(new Map<string, HTMLButtonElement>());
   const layerLabels = useRef(new Map<Layer, HTMLSpanElement>());
+  const landingLabel = useRef<HTMLSpanElement>(null);
   const pointers = useRef(new Set<number>());
   const click = useRef<{ id: number; x: number; y: number } | null>(null);
   const [hover, setHover] = useState<{ id: string; x: number; y: number; text: string } | null>(null);
@@ -43,6 +45,10 @@ export default function ThreeGraph({
     const element = canvas.current;
     if (!element) return;
     let graph: ThreeGraphScene;
+    function placePlaneLabel(label: HTMLSpanElement, point: GraphPoint | null) {
+      label.hidden = !point;
+      if (point) label.style.transform = "translate3d(" + point.x + "px," + point.y + "px,0) translate(-125%, -50%)";
+    }
     function placeLabels() {
       for (const [id, label] of labels.current) {
         const point = graph.projectLabel(id);
@@ -53,10 +59,9 @@ export default function ThreeGraph({
         }
       }
       for (const [layer, label] of layerLabels.current) {
-        const point = graph.projectLayer(layer);
-        label.hidden = !point;
-        if (point) label.style.transform = "translate3d(" + point.x + "px," + point.y + "px,0) translate(-125%, -50%)";
+        placePlaneLabel(label, graph.projectLayer(layer));
       }
+      if (landingLabel.current) placePlaneLabel(landingLabel.current, graph.projectLanding());
     }
     try {
       graph = new ThreeGraphScene(element, placeLabels);
@@ -65,7 +70,10 @@ export default function ThreeGraph({
       return;
     }
     scene.current = graph;
-    const syncTheme = () => graph.setSelectionColor(getComputedStyle(element).getPropertyValue("--xa-brand").trim());
+    const syncTheme = () => {
+      const style = getComputedStyle(element);
+      graph.setThemeColors(style.getPropertyValue("--xa-brand").trim(), style.getPropertyValue("--xa-muted").trim());
+    };
     syncTheme();
     const appearance = new MutationObserver(syncTheme);
     appearance.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-xartifact-palette"] });
@@ -80,8 +88,8 @@ export default function ThreeGraph({
   }, [onUnavailable]);
 
   useLayoutEffect(() => {
-    scene.current?.updateLayout(nodes, edges, size, selectedNodeId, highlight, neighbors);
-  }, [nodes, edges, size, selectedNodeId, highlight, neighbors]);
+    scene.current?.updateLayout({ nodes, edges, size, selected: selectedNodeId, highlight, neighbors, fallingNodes });
+  }, [nodes, edges, size, selectedNodeId, highlight, neighbors, fallingNodes]);
 
   function pick(event: PointerEvent<HTMLCanvasElement>) {
     const box = event.currentTarget.getBoundingClientRect();
@@ -157,6 +165,7 @@ export default function ThreeGraph({
               else layerLabels.current.delete(layer);
             }}>L{layer}</span>
         ))}
+        <span ref={landingLabel} aria-hidden="true" hidden className="sage-webgl-layer">落地区</span>
         {nodes.map((node) => {
           const selected = selectedNodeId === node.id;
           const visible = showGraphLabel(labelMode, node.layer, nodes.length <= 24,

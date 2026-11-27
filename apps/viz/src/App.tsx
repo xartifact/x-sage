@@ -34,6 +34,7 @@ import Workbench from "./Workbench";
 import { ApiError, api, fetchBuildIdentity, type BuildIdentity } from "./api";
 import { browseGraph, countDomains, domainName } from "./graph-browser";
 import { graphLabelMode, type GraphLabelMode } from "./graph-camera";
+import { unsupportedGraphNodes } from "./graph-gravity";
 import {
   conceptName,
   EDGE_TYPES,
@@ -300,6 +301,8 @@ function Workspace({
   const [directoryMode, setDirectoryMode] = useState<"list" | "filters">("list");
   const [domain, setDomain] = useState("");
   const [graphMode, setGraphMode] = useState<"2d" | "3d">("2d");
+  const [gravityEnabled, setGravityEnabled] = useState(false);
+  const [threeUnavailable, setThreeUnavailable] = useState(false);
   const [labelMode, setLabelMode] = useState<GraphLabelMode>(() => {
     try {
       return graphLabelMode(localStorage.getItem(graphLabelStorageKey));
@@ -342,6 +345,11 @@ function Workspace({
   const graph = useMemo(() => browseGraph(data, {
     domain, query, layers, relations: edges, neighborsOf,
   }), [data, domain, query, layers, edges, neighborsOf]);
+  const fallingNodes = useMemo(() => (
+    gravityEnabled && graphMode === "3d" && !threeUnavailable && data ? unsupportedGraphNodes(data) : null
+  ), [data, gravityEnabled, graphMode, threeUnavailable]);
+  const visibleFallingCount = fallingNodes
+    ? graph.nodes.filter(({ id }) => fallingNodes.has(id)).length : 0;
   const domainOptions = domain && !domains.some(({ id }) => id === domain)
     ? [...domains, { id: domain, count: 0 }] : domains;
 
@@ -578,14 +586,28 @@ function Workspace({
                   ))}
                 </div>
                 {graphMode === "3d" && (
-                  <label className="sage-graph-label-setting">
-                    节点名称
-                    <select value={labelMode} onChange={(event) => setLabelMode(graphLabelMode(event.currentTarget.value))}>
-                      {Object.entries(graphLabelOptions).map(([value, label]) => (
-                        <option key={value} value={value}>{label}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <>
+                    <label className="sage-graph-label-setting">
+                      节点名称
+                      <select value={labelMode} onChange={(event) => setLabelMode(graphLabelMode(event.currentTarget.value))}>
+                        {Object.entries(graphLabelOptions).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <Button
+                      className="sage-graph-gravity"
+                      variant="outline"
+                      size="sm"
+                      role="switch"
+                      aria-checked={!!fallingNodes}
+                      disabled={threeUnavailable}
+                      title="沿已确认的依赖、分类和实例化关系追溯至 L0。筛选不影响支撑判定。"
+                      onClick={() => setGravityEnabled((value) => !value)}
+                    >
+                      物理模拟 <span aria-hidden="true">{fallingNodes ? "开" : "关"}</span>
+                    </Button>
+                  </>
                 )}
               </div>
             </header>
@@ -593,6 +615,9 @@ function Workspace({
               <ConceptGraph
                 mode={graphMode}
                 labelMode={labelMode}
+                fallingNodes={fallingNodes}
+                threeUnavailable={threeUnavailable}
+                onThreeUnavailable={setThreeUnavailable}
                 nodes={graph.nodes}
                 edges={graph.edges}
                 onNodeClick={(node) => node ? select(node.id) : closeDetail()}
@@ -609,6 +634,12 @@ function Workspace({
                 ))}
               </div>
               <div className="sage-graph-actions">
+                {fallingNodes && (
+                  <span className="sage-graph-help" role="status"
+                    title="支撑来自完整知识库中通往 L0 的已确认关系">
+                    {visibleFallingCount} 个概念缺少通往 L0 的支撑
+                  </span>
+                )}
                 {neighborsOf && graph.neighbors.length === 0 && (
                   <span className="text-xs text-muted-foreground" role="status">没有范围外的关联概念</span>
                 )}
